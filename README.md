@@ -17,21 +17,9 @@
 
 ### 어떻게 돌아가나
 
-```
-/research-spec 으로 명세(00_spec.md) 확정       ← 사람과 대화
-        ↓
-작업 공간 준비: 원본 저장소를 클론하고 원격을 지움, 작업 브랜치, 실행 전용 venv
-        ↓
-Phase 1   저장소 조사 + 선행연구 조사 (비교 기준선, 이미 알려진 접근)
-Phase 1.5 여러 모델이 아이디어를 내고, 다른 모델이 비평하고, 선별
-Phase 2   (A/B) 채점 코드 작성 → 자동 점검 → 파일럿     ← 사람이 채점 코드 확인
-Phase 3   A: 비교 실험 / B: 고치고 재고 채택·원복 / C: 증명 ↔ 반박
-Phase 4   다른 계열 모델의 감사 → 보고서
-        ↓
-보고서 확인 → 원본 저장소의 새 브랜치로 push            ← 사람이 확인
-```
+![workflow](docs/workflow.svg)
 
-원칙은 네 가지입니다.
+원칙은 다섯 가지입니다.
 - 원본 저장소의 브랜치는 건드리지 않습니다. 실행마다 클론을 만들고 그 안에서만 작업합니다. 원본에는 마지막에 사람이 승인할 때 새 브랜치 하나만 생깁니다.
 - 코드를 고치는 단계만 권한 전체 허용으로 부릅니다. 조사, 비평, 감사처럼 읽고 쓰기만 하는 단계는 읽기 전용입니다.
 - 실험 실행과 채점은 에이전트가 아니라 제어기가 합니다. 채점 파일은 잠그고 SHA-256 해시로 바뀌었는지 매번 확인합니다. 채점 정답은 클론 밖(`hidden/`)에 두고 채점할 때만 경로를 넘깁니다.
@@ -148,21 +136,9 @@ There are three tracks:
 
 ### How it works
 
-```
-/research-spec to agree on the spec (00_spec.md)      ← conversation with you
-        ↓
-workspace: clone the original repo (remote removed), work branch, per-run venv
-        ↓
-Phase 1   repository survey + literature survey (baselines, known approaches)
-Phase 1.5 several models propose ideas, other models critique, one selects
-Phase 2   (A/B) write the scoring code → automatic checks → pilot   ← you check the scoring code
-Phase 3   A: comparisons / B: edit, measure, keep or revert / C: prove ↔ refute
-Phase 4   audit by other vendors' models → report
-        ↓
-you read the report → pushed as a new branch of the original repo  ← you confirm
-```
+![workflow](docs/workflow.svg)
 
-Four rules:
+Five rules:
 - The original repository's branches are never touched. Each run works inside its own clone. The original only gets one new branch at the end, after you approve.
 - Only the code-editing stages run with full permissions. Stages that only read and write text (survey, critique, audit) run read-only.
 - The controller, not the agent, runs the experiments and scores them. The scoring files are locked and their SHA-256 hashes are checked before every scoring. Reference answers live outside the clone (`hidden/`) and their path is passed only to the scoring scripts.
