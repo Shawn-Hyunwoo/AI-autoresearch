@@ -72,7 +72,7 @@ CLI 비대화형 호출을 기본값으로 두고, 단일 라우터(`llm_router.
 
 | 단계 및 슬롯 | 요구 핵심 역량 | 기본 배정 `(provider / model / effort)` | 권한 |
 |---|---|---|---|
-| `phase1_recon` | 장문 코드 분석 + 다수 문헌 종합 | `[claude/opus/high (repo_scan), agy/neon/high (lit_search)]` | 읽기 전용 |
+| `phase1_recon` | 장문 코드 분석 + 교차 조사 정리·검증 (조사자는 `providers.yaml`의 `search`) | `[claude/opus/high (repo_scan), claude/opus/xhigh (lit_search)]` | 읽기 전용 |
 | `phase2_ideation.divergers` | 추상 물리·수리 추론 및 타 분야 이식 | `[claude/fable/high, claude/opus/xhigh, agy/neon/xhigh]` | 읽기 전용 |
 | `phase2_ideation.critics` | diverger와 1:1 토론, 후보별 채택·보완 요청·탈락 판정 | `[agy/neon/xhigh, codex/sol/xhigh]` | 읽기 전용 |
 | `phase2_ideation.selector` | 다문서 종합 및 최종 후보 확정 | `claude/opus/xhigh` | 읽기 전용 |
@@ -200,6 +200,7 @@ base_env: "<conda env 이름 또는 python 절대경로>"   # 실행 전용 venv
 setup_cmds: []                    # venv 생성 뒤 클론 폴더에서 한 번 실행 (예: "pip install -e . --no-build-isolation")
 build_cmd: ""                     # 소스 수정 뒤 채점 전에 매번 실행 (확장 모듈 재빌드 등)
 copy_inputs: []                   # 원본에서 git-ignored 상태라 클론에 없는 입력. 복사한다
+references: []                    # (선택) 선행연구 조사가 먼저 읽을 자료 (원본 기준 경로, URL, 논문 제목)
 push_remote: "origin"             # 보고서 확인 뒤 새 브랜치를 push할 원본의 원격
 workspace:
   focus_hint: []
@@ -224,7 +225,7 @@ stages:                           # 단계별 모델 배정 전체 (2.4절 표).
   phase1_recon:
     slots:
       - {provider: claude, model: opus, effort: high, role: repo_scan}
-      - {provider: agy, model: neon, effort: high, role: lit_search}
+      - {provider: claude, model: opus, effort: xhigh, role: lit_search}   # 트랙 A·C는 교차 조사를 합치고 검증
   phase2_ideation: {divergers: [...], critics: [...], selector: {...}}
   phase3_pilot: {builder: {...}}
   crash_repair: {...}
@@ -251,13 +252,22 @@ falsification:
 
 ### Phase 1: 예비조사 및 선행연구 조사 (`01_recon.md`)
 
-단순 중단 판정 대신 후속 설계에 꼭 필요한 두 가지 목록을 분리해 구축한다. `phase1_recon.slots`의 `role`마다 `prompts/phase1_<role>.md` 지침을 쓴다.
+후속 설계에 필요한 목록을 만든다. 트랙 A와 C는 비교 기준(SoTA)과 이미 알려진 결과를 넓고 정확하게 찾는 것이 결과의 신뢰를 정하므로 여러 벤더가 교차 조사한다(2026-11-19). 트랙 B는 코드 최적화라 저장소 안과 일반 자료로 충분하다고 보고 한 번만 조사한다.
 
 1. 저장소 내부 자산 확인(`repo_scan`): 저장소 규칙 문서(`AGENTS.md`, `CLAUDE.md`), 기존 모듈, 과거 실험 결과와 노트를 스캔해 재사용 가능한 코드와 기존 지표 함수를 파악한다.
-2. 선행연구 2분류 정리(`lit_search`):
-   - 필수 비교 기준선(`SoTA Baselines`): 고전 및 기존 양자 분야의 SoTA(State of the Art, 현재 해당 문제에서 가장 성능이 검증된 최신 최고 기법)를 추려 파일럿과 본 실험의 공식 비교 대상으로 고정한다.
-   - 중복 제안 방지 목록(`Known Approaches`): 학계에 이미 보고된 통상적 변형을 정리해 다음 단계에서 새 아이디어로 중복 제안하지 못하게 막는 필터로 넘긴다.
-   - 출처를 직접 확인하지 못한 항목은 "미확인"으로 표시하고, 기억에 기댄 인용은 만들지 않는다.
+2. 사용자 자료(`references`, 선택): 명세에 원본 기준 경로(PDF, 폴더)나 URL, 논문 제목을 적으면 조사자가 먼저 읽는다. 경로는 클론의 `.ar_refs/`로 복사하며, 이 폴더는 클론의 `.git/info/exclude`에 들어가 커밋과 push에서 빠진다(git-ignored 참고 PDF도 쓸 수 있게 복사한다).
+3. 교차 조사(트랙 A·C): `providers.yaml`에서 `search`가 있는 벤더(기본 claude, agy, codex)가 각자 같은 주제를 따로 조사한다(`prompts/phase1_search.md`). 서로 다른 검색 엔진과 모델이 찾으므로 한 모델이 놓친 자료가 다른 모델에서 나온다. 조사자 모델은 명세에 적지 않는 내부 기본값이다(바꾸려면 명세의 `stages.phase1_recon.searchers`에 슬롯 목록을 적을 수 있지만 템플릿에는 두지 않는다). 2026-11-19 세 CLI 모두 읽기 전용 호출에서 웹 검색이 되는 것을 확인했다(학습 시점 뒤의 arXiv 논문 제목을 셋 다 맞혔다).
+   - 트랙 A: 이 과제의 고전 SoTA와 보고된 지표 값·설정, 양자 방법과 보고된 결과, 이미 보고된 통상적인 변형
+   - 트랙 C: 명세의 정리(또는 같거나 더 강한 진술)가 이미 증명·반증되었는지, 관련 정리·경계·반례·불가능성 결과, 증명 기법과 열린 문제
+4. 인용 확인(제어기, 모델 없음): 조사자 보고와 최종 정리에 나온 arXiv 번호와 DOI를 arXiv API와 Crossref로 직접 조회해 실제로 있는지, 제목, 첫 저자, 연도를 표로 만든다. 없는 번호는 **없음**으로 표시한다. 최근 몇 개월을 반드시 검색하라는 식의 규칙은 두지 않는다(최신 결과와 기본 문헌을 함께 찾으라고만 한다).
+5. 정리·검증(`lit_search` 슬롯, `prompts/phase1_lit_synth.md`): 조사자 보고와 인용 확인 표를 받아 같은 출처를 합치고(찾은 조사자 수를 적음), 맞지 않는 인용을 바로잡거나 빼고, 핵심 주장(보고된 지표 값, 정리의 진술과 가정)을 출처를 열어 대조하고, 놓친 하위 주제는 직접 찾아 채운다. 출력:
+   - 트랙 A: `SoTA Baselines` 표(방법, 종류, 데이터, 보고된 지표 값, 설정, 출처, 찾은 조사자 수, 확인 상태). 파일럿과 본 실험의 공식 비교 대상이 된다.
+   - 트랙 C: `Known Results` 표(진술, 상태: 증명됨·반증됨·열린 문제, 가정, 출처, 연도, 확인 상태)와 "명세의 정리는 이미 알려져 있는가" 판정
+   - 공통: `Known Approaches`(다음 단계가 같은 것을 새 아이디어로 내지 못하게 거르는 목록), 조사 기록(날짜, 검색어, 조사자끼리 어긋난 점)
+   - 최종 정리 아래에 인용 확인 표를 다시 붙인다.
+6. 트랙 B만이면 `lit_search`가 혼자 `SoTA Baselines`와 `Known Approaches`를 조사한다(`prompts/phase1_lit_search.md`).
+7. 뒤 단계 연결: Phase 2 토론은 조사 전체를 받는다. 트랙 C의 prover는 이미 증명된 결과를 다시 증명하지 않고 인용하며 무엇이 다른지 적고, refuter는 Known Results에 이미 있는 결과인지를 `non_trivial` 판정에 넣는다. Phase 5 감사는 "새롭다", "기존보다 낫다"는 주장을 조사 결과와 대조한다.
+8. 호출: 트랙 A·C는 repo_scan 1 + 조사자 3 + 정리·검증 1. 조사자도 실행당 호출 상한(`run_limits`)에 들어간다(codex 조사자 1회).
 
 ### Phase 2: 아이디어 토론 및 선별 (`02_ideation/`)
 
@@ -525,7 +535,7 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 └── repo/                                # 원본 클론 (원격 없음, 브랜치 autoresearch/<run_id>)
     └── research_runs/<run_id>/          # 산출물 (git에서 숨김)
         ├── 00_spec.md  providers.yaml  env.txt  lock.json
-        ├── 01_recon.md  01_recon/       # Phase 1
+        ├── 01_recon.md  01_recon/       # Phase 1: recon_*.md, search_*.md(조사자), lit_synth.md
         ├── 02_ideation/                # Phase 2: t<토론>_r<회차>_diverger.md·critic.md, 대화 기록, debates.md, selector.md, 02_selected.json
         ├── evaluation/                  # 잠긴 prepare.py, 50줄 metrics.py, test_gate.py, (B) run_bench.sh
         ├── 03_pilot/                    # Phase 3: 후보별 run.sh, result/, score.json, pilot_table.md

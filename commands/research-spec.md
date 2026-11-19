@@ -27,6 +27,7 @@ argument-hint: <연구 질문>
    - base_env: 프로젝트 CLAUDE.md·AGENTS.md에 적힌 env를 쓴다. 없으면 질문에 필요한 패키지가 있는 conda env를 찾아 고른다.
    - setup_cmds, build_cmd: README와 빌드 파일(pyproject.toml, setup.py, CMakeLists.txt 등)을 보고 정한다. 필요 없으면 비운다.
    - push_remote: 원본 저장소의 원격 이름.
+   - references: 사용자가 말한 참고 자료(논문, PDF 폴더, URL)를 적는다. 저장소에 git-ignored 참고 문헌 폴더가 보이면 (추측)으로 넣는다. 없으면 비우고 따로 묻지 않는다.
    - evaluation_contract: 질문에서 guard(깨지면 안 되는 조건)와 metric(지표와 방향)을 정한다. 트랙 B면 min_improvement_pct도 정한다.
    - budget: 기본값을 쓴다. 쓰는 트랙에 필요한 항목만 적는다. 공통은 max_crash_repairs, run_limits, max_ideation_rounds(Phase 2 아이디어 토론의 최대 회차, 기본 1). 트랙 A·B는 max_iterations, 트랙 A는 seeds, 트랙 B는 bench_rounds, 트랙 C는 max_debate_rounds. call_timeout_min은 선택이다.
    - stages: 기본값을 쓴다. 쓰는 트랙의 단계를 빠짐없이 적는다. 모델과 추론 단계는 providers.yaml에 있는 것만 쓴다.

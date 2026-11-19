@@ -14,7 +14,9 @@ import subprocess
 import time
 import traceback
 import urllib.error
+import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -84,6 +86,11 @@ for where, s in slots_in(STAGES):
         BAD.append(f"{where}: {s['provider']}에 없는 모델 '{s.get('model')}' (있는 것: {', '.join(v['aliases'])})")
     elif s.get("effort") not in v["efforts"]:
         BAD.append(f"{where}: {s['provider']}에 없는 추론 단계 '{s.get('effort')}' (있는 것: {', '.join(v['efforts'])})")
+for k, v in PROV["vendors"].items():   # 선행연구 교차 조사의 기본 조사자 (providers.yaml의 search)
+    if v.get("search") and (v["search"].get("model") not in v["aliases"] or v["search"].get("effort") not in v["efforts"]):
+        BAD.append(f"{PROV_PATH.name} vendors.{k}.search: 없는 모델이나 추론 단계 {v['search']}")
+if {"A", "C"} & set(TRACKS) and not any(s.get("role") == "lit_search" for s in STAGES["phase1_recon"]["slots"]):
+    BAD.append("stages.phase1_recon.slots: 트랙 A·C에는 교차 조사를 합치고 검증할 role: lit_search 슬롯이 필요합니다")
 if BAD:
     raise SystemExit(f"명세의 모델 배정에 {PROV_PATH.name}에 없는 값이 있습니다:\n" + "\n".join(BAD))
 AUDIT = STAGES["phase5_audit"]
@@ -502,13 +509,91 @@ def phase_workspace():
     (OUT / "env.txt").write_text(f"{sh([PY, '--version']).stdout}base_commit {STATE['base_commit']}\n\n{v}")
 
 
-# ---- Phase 1: 저장소 내부 자산 + 선행연구(SoTA 기준선, 이미 알려진 접근)
+# ---- Phase 1: 저장소 내부 자산 + 선행연구(SoTA 기준선, 알려진 결과, 이미 알려진 접근).
+# 트랙 A·C는 search가 있는 벤더들이 같은 주제를 따로 조사하고(교차 조사), lit_search 슬롯의 모델이 합치고 검증한다.
+# 트랙 B만이면 lit_search 한 번으로 끝낸다
+def references():
+    # 명세 references: 사용자가 준 참고 자료. 경로면 클론의 .ar_refs/에 복사하고(git에서 제외되어 push되지 않음),
+    # 경로가 아니면(URL, 논문 제목 등) 글 그대로 넘긴다
+    refs, out = CFG.get("references") or [], []
+    ex = REPO / ".git" / "info" / "exclude"
+    if refs and "/.ar_refs/" not in ex.read_text():
+        with open(ex, "a") as f:
+            f.write("/.ar_refs/\n")
+    for r in refs:
+        p = Path(str(r)).expanduser()
+        p = p if p.is_absolute() else SRC / p
+        if p.exists():
+            d = REPO / ".ar_refs" / p.name
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(p, d, dirs_exist_ok=True) if p.is_dir() else shutil.copy2(p, d)
+            out.append(f"- {d.relative_to(REPO)} (사용자 자료. 먼저 읽는다)")
+        else:
+            out.append(f"- {r}")
+    return "\n".join(out) or "없음"
+
+
+def check_citations(text):
+    # 글에 나온 arXiv 번호와 DOI를 arXiv API와 Crossref에서 직접 조회한다(모델 없이). 결과는 마크다운 표
+    ids = sorted({m for m in re.findall(r"(?<![\d.])(\d{4}\.\d{4,5})(?:v\d+)?(?!\.?\d)", text) if 1 <= int(m[2:4]) <= 12})
+    dois = sorted({d.rstrip(".,;:)]}*_") for d in re.findall(r"\b10\.\d{4,9}/[^\s\"'<>|`]+", text)})
+    head, rows = {"User-Agent": "AI-autoresearch citation check"}, []
+    cell = lambda x: " ".join(str(x).split()).replace("|", "/")
+    for k in range(0, len(ids), 50):
+        chunk = ids[k:k + 50]
+        try:
+            xml = urllib.request.urlopen(urllib.request.Request(
+                f"https://export.arxiv.org/api/query?id_list={','.join(chunk)}&max_results={len(chunk)}", headers=head),
+                timeout=30).read()
+            ns, found = {"a": "http://www.w3.org/2005/Atom"}, {}
+            for e in ET.fromstring(xml).findall("a:entry", ns):
+                m = re.search(r"abs/(.+?)(v\d+)?$", e.findtext("a:id", "", ns))
+                if m:
+                    found[m[1]] = (cell(e.findtext("a:title", "", ns)), cell(e.findtext("a:author/a:name", "", ns)),
+                                   e.findtext("a:published", "", ns)[:4])
+            rows += [f"| arXiv:{x} | 있음 | {' | '.join(found[x])} |" if x in found else f"| arXiv:{x} | **없음** | | | |"
+                     for x in chunk]
+        except Exception as e:
+            rows += [f"| arXiv:{x} | 조회 실패 ({type(e).__name__}) | | | |" for x in chunk]
+    for d in dois:
+        try:
+            m = json.loads(urllib.request.urlopen(urllib.request.Request(
+                f"https://api.crossref.org/works/{urllib.parse.quote(d)}", headers=head), timeout=20).read())["message"]
+            rows.append(f"| doi:{d} | 있음 | {cell((m.get('title') or [''])[0])} | "
+                        f"{cell((m.get('author') or [{}])[0].get('family', ''))} | "
+                        f"{((m.get('issued') or {}).get('date-parts') or [['']])[0][0]} |")
+        except urllib.error.HTTPError as e:
+            rows.append(f"| doi:{d} | {'**없음**' if e.code == 404 else f'조회 실패 ({e.code})'} | | | |")
+        except Exception as e:
+            rows.append(f"| doi:{d} | 조회 실패 ({type(e).__name__}) | | | |")
+    if not rows:
+        return "글에 arXiv 번호나 DOI가 없음"
+    return "| 인용 | 조회 결과 | 제목 | 첫 저자 | 연도 |\n|---|---|---|---|---|\n" + "\n".join(rows)
+
+
 def phase_recon():
-    slots = STAGES["phase1_recon"]["slots"]
-    texts = parallel([(s, prompt(f"phase1_{s['role']}.md", spec=SPEC_TEXT), OUT / "01_recon" / f"recon_{i:02d}.md",
-                       "readonly", True) for i, s in enumerate(slots, 1)])
-    (OUT / "01_recon.md").write_text("\n\n".join(
-        f"# {s['role']} ({s['provider']}/{s['model']}/{s['effort']})\n\n{t}" for s, t in zip(slots, texts)))
+    st, refs = STAGES["phase1_recon"], references()
+    deep = bool({"A", "C"} & set(TRACKS))
+    plain = [s for s in st["slots"] if not (deep and s["role"] == "lit_search")]
+    finders = (st.get("searchers") or [{"provider": k, **v["search"]} for k, v in PROV["vendors"].items()
+                                       if v.get("search")]) if deep else []
+    texts = parallel([(s, prompt(f"phase1_{s['role']}.md", spec=SPEC_TEXT, references=refs),
+                       OUT / "01_recon" / f"recon_{i:02d}.md", "readonly", True) for i, s in enumerate(plain, 1)]
+                     + [(s, prompt("phase1_search.md", n=i, track=",".join(TRACKS), spec=SPEC_TEXT, references=refs),
+                         OUT / "01_recon" / f"search_{i:02d}.md", "readonly", True) for i, s in enumerate(finders, 1)])
+    parts = [f"# {s['role']} ({s['provider']}/{s['model']}/{s['effort']})\n\n{t}" for s, t in zip(plain, texts)]
+    if deep:
+        synth = next(s for s in st["slots"] if s["role"] == "lit_search")
+        who = ", ".join(f"{s['provider']}/{s['model']}" for s in finders)
+        reports = "\n\n".join(f"## 조사자 {i} ({s['provider']}/{s['model']})\n\n{t}"
+                               for i, (s, t) in enumerate(zip(finders, texts[len(plain):]), 1))
+        lit = agent("lit_search", synth, prompt("phase1_lit_synth.md", track=",".join(TRACKS), spec=SPEC_TEXT,
+                                                references=refs, who=who, reports=reports,
+                                                citations=check_citations(reports)),
+                    OUT / "01_recon" / "lit_synth.md", "readonly", human=True)
+        parts.append(f"# lit_search (교차 조사: {who} / 정리·검증: {synth['provider']}/{synth['model']}/{synth['effort']})"
+                     f"\n\n{lit}\n\n## 인용 확인 (제어기가 arXiv와 Crossref에서 직접 조회)\n\n{check_citations(lit)}")
+    (OUT / "01_recon.md").write_text("\n\n".join(parts))
 
 
 # ---- Phase 2: 아이디어 토론 → 선별. diverger마다 critic 한 명과 1:1로 최대 max_ideation_rounds회 주고받고,
@@ -816,12 +901,13 @@ def phase_track_c():
         rd, prev = MAIN / f"C_round_{n:02d}", MAIN / f"C_round_{n - 1:02d}"
         proof = agent("C_prover", st["prover"], prompt(
             "track_c_prove.md", n=n, spec=SPEC_TEXT, selected=read(OUT / "02_ideation" / "02_selected.json"),
+            known=read(OUT / "01_recon.md"),
             prev_proof=read(prev / "proof.md", "없음 (첫 라운드)"), objections=read(prev / "refute.md", "없음"),
             verdict=json.dumps(C["verdict"], ensure_ascii=False) if C["verdict"] else "없음"),
             rd / "proof.md", "readonly")
         try:
             _, logic = agent_json("C_refuter", st["refuter"], prompt(
-                "track_c_refute.md", n=n, spec=SPEC_TEXT, proof=proof, round_dir=rd),
+                "track_c_refute.md", n=n, spec=SPEC_TEXT, proof=proof, round_dir=rd, known=read(OUT / "01_recon.md")),
                 rd / "refute.md", "full", parse_verdict, VERDICT_SCHEMA)
         except ValueError:
             logic = {"logic_sound": False, "fatal_flaws": ["반박 모델의 판정 JSON을 다시 요청해도 받지 못함"]}

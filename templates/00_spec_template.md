@@ -9,6 +9,8 @@ base_env: "<conda env 이름 또는 python 절대경로>"   # 실행 전용 venv
 setup_cmds: []                    # venv 생성 뒤 클론 폴더에서 한 번 실행 (예: "pip install -e . --no-build-isolation")
 build_cmd: ""                     # 소스 수정 뒤 채점 전에 매번 실행 (C++/HIP 확장 재빌드 등). 없으면 빈 문자열
 copy_inputs: []                   # 원본에서 git-ignored 상태라 클론에 없는 입력 (예: "data/"). 복사한다
+references: []                    # (선택) 선행연구 조사가 먼저 읽을 자료: 원본 기준 경로(PDF, 폴더)나 URL, 논문 제목.
+                                  #   경로는 클론의 .ar_refs/로 복사되고 push되지 않는다
 push_remote: "origin"             # 보고서 확인 뒤 새 브랜치를 push할 원본의 원격. 공개 저장소면 push하지 않는다
 workspace:
   focus_hint: []                  # 먼저 볼 모듈
@@ -35,7 +37,8 @@ stages:                           # 단계별 모델 배정. 쓰는 트랙의 �
   phase1_recon:
     slots:                        # role마다 prompts/phase1_<role>.md
       - {provider: claude, model: opus, effort: high, role: repo_scan}
-      - {provider: agy, model: neon, effort: high, role: lit_search}
+      - {provider: claude, model: opus, effort: xhigh, role: lit_search}   # 트랙 A·C: 세 벤더가 따로 조사한 것을 합치고
+                                                                        #   검증한다. 트랙 B: 혼자 조사한다
   phase2_ideation:
     divergers:                    # 아이디어를 내는 모델. 같은 모델을 여러 줄 넣을 때는 lens: "통계물리 관점"처럼 관점을 붙인다
       - {provider: claude, model: fable, effort: high}

@@ -5,6 +5,9 @@
 # session: 여러 번 주고받는 단계(아이디어 토론)에서 앞 대화를 이어 쓰는 방법. new는 첫 호출, resume은 다음 호출에 붙고
 # {session}이 세션 번호로 바뀐다. id는 세션 번호를 얻는 곳: uuid(제어기가 정해 넘김), jsonl(codex 이벤트의 thread_id),
 # json(agy 출력의 conversation_id). 2026-11-19 세 CLI 모두 두 번째 호출이 첫 호출 내용을 기억하는 것을 확인했다.
+# search: 트랙 A·C의 선행연구 교차 조사에서 이 벤더가 조사자로 나설 때 쓰는 모델. 기본은 search가 있는 벤더 셋이
+# 모두 따로 조사한다(명세에서 바꿀 일은 거의 없다). 2026-11-19 세 CLI 모두 읽기 전용 호출에서 웹 검색이 되는 것을
+# 확인했다(학습 시점 뒤의 arXiv 논문 제목을 셋 다 맞힘. codex는 따로 켜지 않아도 검색한다).
 
 vendors:
   claude:
@@ -15,6 +18,7 @@ vendors:
     readonly_flags: ["--permission-mode", "dontAsk", "--allowedTools", "Read,Grep,Glob,WebSearch,WebFetch"]
     prompt_via: stdin
     session: {id: uuid, new: ["--session-id", "{session}"], resume: ["--resume", "{session}"]}
+    search: {model: opus, effort: high}
     escalation_ladder:
       - {model: opus, effort: high}
       - {model: opus, effort: xhigh}
@@ -30,6 +34,7 @@ vendors:
     prompt_via: arg
     prompt_arg: "-p={prompt}"
     session: {id: json, new: ["--output-format", "json"], resume: ["--output-format", "json", "--conversation", "{session}"]}
+    search: {model: neon, effort: high}
     escalation_ladder:
       - {model: neon, effort: medium}
       - {model: neon, effort: high}
@@ -51,6 +56,7 @@ vendors:
       resume: ["--json", "{session}"]
       resume_cmd: ["codex", "exec", "resume", "--skip-git-repo-check", "-m", "{model}", "-c", "model_reasoning_effort={effort}", "-o", "{out}"]
       resume_readonly_flags: ["-c", "sandbox_mode=read-only"]   # resume은 -s를 받지 않는다
+    search: {model: sol, effort: high}
     escalation_ladder:
       - {model: sol, effort: medium}
       - {model: sol, effort: high}
