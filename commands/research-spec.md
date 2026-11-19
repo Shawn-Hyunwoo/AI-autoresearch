@@ -10,7 +10,7 @@ argument-hint: <연구 질문>
 먼저 읽을 것:
 - `~/autoresearch/templates/00_spec_template.md` (명세서 형식과 기본 모델 배정·호출 상한)
 - `~/autoresearch/providers.yaml` (벤더, 모델 별명, 추론 단계. 명세에 옮겨 적지 않는다)
-- 쓸 수 있는 벤더: providers.yaml의 벤더마다 `cmd`의 첫 단어(claude, agy, codex)를 `command -v`로 확인한다. 설치되지 않은 벤더는 쓰지 않는다
+- 쓸 수 있는 벤더: providers.yaml의 벤더마다 `cmd`의 첫 단어(claude, agy, codex)를 `command -v`로 확인한다. 설치되지 않은 벤더와, 설치되어 있어도 사용자가 쓰지 않는다고 한 벤더는 명세에 넣지 않는다. 제어기는 명세에 나온 벤더를 쓸 수 있는 벤더로 본다
 - 기본값: `<프로젝트>/.autoresearch/defaults.yaml`이 있으면 그 값으로 템플릿을 채운다. 없으면 `~/autoresearch_runs/<프로젝트명>/*/00_spec.md` 중 가장 최근 것의 값을 쓴다. 둘 다 없으면 템플릿 값 그대로다.
 - `~/autoresearch/prompts/_writing_rules.md` (질문과 설명에 적용할 서술 규칙)
 - 지금 폴더가 git 저장소면 그 저장소의 CLAUDE.md 또는 AGENTS.md

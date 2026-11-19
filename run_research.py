@@ -65,32 +65,6 @@ if not STAGES["phase2_ideation"].get("critics"):
     raise SystemExit("stages.phase2_ideation.critics가 비어 있습니다 (diverger마다 critic 한 명과 토론합니다)")
 
 
-# 쓸 수 있는 벤더: providers.yaml에 있고 CLI가 설치된 것. 하나뿐이면 분리 규칙을 벤더 대신 모델 단위로 지킨다
-AVAIL = [k for k, v in PROV["vendors"].items() if shutil.which(v["cmd"][0])]
-if not AVAIL:
-    raise SystemExit(f"{PROV_PATH.name}의 벤더 CLI가 하나도 설치되어 있지 않습니다 "
-                     f"({', '.join(v['cmd'][0] for v in PROV['vendors'].values())})")
-SOLO = len(AVAIL) == 1
-UNIT = "모델" if SOLO else "벤더"
-ADAPT = [f"쓸 수 있는 벤더가 {AVAIL[0]} 하나라 교차 검토를 다른 벤더 대신 다른 모델로 했다 (독립성이 약하다)"] if SOLO else []
-
-
-def kin(s):
-    # 분리 규칙의 단위: 벤더. 쓸 수 있는 벤더가 하나뿐이면 모델
-    return (s["provider"], s["model"]) if SOLO else s["provider"]
-
-
-for k in AVAIL:   # 한도 초과 때 넘어갈 곳이 설치되지 않은 벤더면, 다른 설치된 벤더(없으면 자기)의 사다리 맨 위로 바꾼다
-    v, fb = PROV["vendors"][k], PROV["vendors"][k].get("fallback_on_quota") or {}
-    if fb.get("provider") not in AVAIL:
-        alt = next((o for o in AVAIL if o != k), k)
-        a = PROV["vendors"][alt]
-        v["fallback_on_quota"] = {"provider": alt, **(a.get("escalation_ladder")
-                                                     or [{"model": next(iter(a["aliases"])), "effort": a["efforts"][-1]}])[-1]}
-        ADAPT.append(f"{k}의 한도 초과 대체를 {fb.get('provider')}(설치 안 됨)에서 "
-                     f"{alt}/{v['fallback_on_quota']['model']}/{v['fallback_on_quota']['effort']}로 바꿨다")
-
-
 def slots_in(x, path="stages"):
     # 명세 stages 안의 모든 모델 슬롯 (after_quota 포함)
     if isinstance(x, dict):
@@ -103,27 +77,52 @@ def slots_in(x, path="stages"):
             yield from slots_in(v, f"{path}[{i}]")
 
 
+# 명세가 쓰는 벤더를 사용자가 쓸 수 있는 벤더로 본다(CLI가 깔려 있어도 구독하지 않은 벤더는 명세에 넣지 않는다).
+# 하나뿐이면 분리 규칙을 벤더 대신 모델 단위로 지키고, 한도 초과 대체와 교차 조사도 이 벤더들 안에서만 한다
+USED = sorted({s["provider"] for _, s in slots_in(STAGES) if s.get("provider") in PROV["vendors"]})
+SOLO = len(USED) == 1
+UNIT = "모델" if SOLO else "벤더"
+ADAPT = [f"명세가 쓰는 벤더가 {USED[0]} 하나라 교차 검토를 다른 벤더 대신 다른 모델로 했다 (독립성이 약하다)"] if SOLO else []
+
+
+def kin(s):
+    # 분리 규칙의 단위: 벤더. 명세가 쓰는 벤더가 하나뿐이면 모델
+    return (s["provider"], s["model"]) if SOLO else s["provider"]
+
+
 BAD = []   # 오타는 그 단계가 호출될 때가 아니라 시작할 때 잡는다
 for where, s in slots_in(STAGES):
     v = PROV["vendors"].get(s["provider"])
     if not v:
         BAD.append(f"{where}: 없는 벤더 '{s['provider']}' (있는 것: {', '.join(PROV['vendors'])})")
-    elif s["provider"] not in AVAIL:
-        BAD.append(f"{where}: '{s['provider']}' CLI({v['cmd'][0]})가 설치되어 있지 않음 (쓸 수 있는 것: {', '.join(AVAIL)})")
     elif s.get("model") not in v["aliases"]:
         BAD.append(f"{where}: {s['provider']}에 없는 모델 '{s.get('model')}' (있는 것: {', '.join(v['aliases'])})")
     elif s.get("effort") not in v["efforts"]:
         BAD.append(f"{where}: {s['provider']}에 없는 추론 단계 '{s.get('effort')}' (있는 것: {', '.join(v['efforts'])})")
-for k, v in ((k, PROV["vendors"][k]) for k in AVAIL):   # 교차 조사의 기본 조사자(search)와 한도 초과 대체
-    fb = v["fallback_on_quota"]
-    if fb["model"] not in PROV["vendors"][fb["provider"]]["aliases"] or fb["effort"] not in PROV["vendors"][fb["provider"]]["efforts"]:
+for i in range(4):   # 명세가 쓰는 CLI가 있는가. 자동 업데이트 중에는 실행 파일이 잠깐 없으므로 몇 번 다시 본다
+    missing = [k for k in USED if not shutil.which(PROV["vendors"][k]["cmd"][0])]
+    if not missing or i == 3:
+        break
+    print(f"CLI를 찾지 못함: {', '.join(missing)}. 15초 뒤 다시 확인 (자동 업데이트 중일 수 있음)", flush=True)
+    time.sleep(15)
+BAD += [f"{k}: CLI({PROV['vendors'][k]['cmd'][0]})를 찾지 못함. 설치하거나 명세에서 이 벤더를 뺀다" for k in missing]
+for k in USED:   # 한도 초과 때 넘어갈 곳이 명세가 쓰지 않는 벤더면, 쓰는 다른 벤더(없으면 자기)의 사다리 맨 위로 바꾼다
+    v, fb = PROV["vendors"][k], PROV["vendors"][k].get("fallback_on_quota") or {}
+    if fb.get("provider") not in USED:
+        alt = next((o for o in USED if o != k), k)
+        a = PROV["vendors"][alt]
+        v["fallback_on_quota"] = fb = {"provider": alt, **(a.get("escalation_ladder") or [
+            {"model": next(iter(a["aliases"])), "effort": a["efforts"][-1]}])[-1]}
+        ADAPT.append(f"{k}의 한도 초과 대체를 명세가 쓰지 않는 벤더에서 {alt}/{fb['model']}/{fb['effort']}로 바꿨다")
+    f = PROV["vendors"][fb["provider"]]
+    if fb.get("model") not in f["aliases"] or fb.get("effort") not in f["efforts"]:
         BAD.append(f"{PROV_PATH.name} vendors.{k}.fallback_on_quota: 없는 모델이나 추론 단계 {fb}")
     if v.get("search") and (v["search"].get("model") not in v["aliases"] or v["search"].get("effort") not in v["efforts"]):
         BAD.append(f"{PROV_PATH.name} vendors.{k}.search: 없는 모델이나 추론 단계 {v['search']}")
 if {"A", "C"} & set(TRACKS) and not any(s.get("role") == "lit_search" for s in STAGES["phase1_recon"]["slots"]):
     BAD.append("stages.phase1_recon.slots: 트랙 A·C에는 교차 조사를 합치고 검증할 role: lit_search 슬롯이 필요합니다")
 if BAD:
-    raise SystemExit(f"명세의 모델 배정에 {PROV_PATH.name}에 없는 값이 있습니다:\n" + "\n".join(BAD))
+    raise SystemExit(f"명세의 모델 배정과 {PROV_PATH.name}를 확인하세요:\n" + "\n".join(BAD))
 AUDIT = STAGES["phase5_audit"]
 if AUDIT.get("checker") and kin(AUDIT["checker"]) == kin(AUDIT["reporter"]):
     raise SystemExit(f"phase5_audit의 checker(보고서 검토)와 reporter는 서로 다른 {UNIT}로 둬야 합니다")
@@ -631,7 +630,7 @@ def phase_recon():
     deep = bool({"A", "C"} & set(TRACKS))
     plain = [s for s in st["slots"] if not (deep and s["role"] == "lit_search")]
     finders = (st.get("searchers") or [{"provider": k, **v["search"]} for k, v in PROV["vendors"].items()
-                                       if v.get("search") and k in AVAIL]) if deep else []
+                                       if v.get("search") and k in USED]) if deep else []
     texts = parallel([(s, prompt(f"phase1_{s['role']}.md", spec=SPEC_TEXT, references=refs),
                        OUT / "01_recon" / f"recon_{i:02d}.md", "readonly", True) for i, s in enumerate(plain, 1)]
                      + [(s, prompt("phase1_search.md", n=i, track=",".join(TRACKS), spec=SPEC_TEXT, references=refs),
@@ -654,7 +653,7 @@ def phase_recon():
 # ---- Phase 2: 아이디어 토론 → 선별. diverger마다 critic 한 명과 1:1로 최대 max_ideation_rounds회 주고받고,
 # 보완 요청이 남지 않으면 그 토론은 끝난다. 통과 후보가 없으면 탈락 사유를 알리고 멈춘다
 def pair_critics(divs, crits):
-    # diverger마다 critic 한 명. 다른 벤더(벤더가 하나뿐이면 다른 모델) critic을 우선하고, 그중 덜 배정된 critic을 고른다
+    # diverger마다 critic 한 명. 다른 벤더(명세가 쓰는 벤더가 하나뿐이면 다른 모델) critic을 우선하고, 덜 배정된 critic을 고른다
     used, out = [0] * len(crits), []
     for dv in divs:
         js = [j for j, c in enumerate(crits) if kin(c) != kin(dv)] or list(range(len(crits)))

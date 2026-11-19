@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import threading
@@ -92,7 +93,7 @@ def call(slot, body, out_file, *, mode, cwd, env, human=False, session=None):
     prompt = f"{safety}\n\n{body}{rules}\n\n{safety}"
     with _lock:
         slot = resolve(slot)
-    fails = 0
+    fails, waited = 0, False
     while True:
         v = P["vendors"][slot["provider"]]
         if slot["effort"] not in v["efforts"]:
@@ -134,6 +135,13 @@ def call(slot, body, out_file, *, mode, cwd, env, human=False, session=None):
         shown = argv if stdin is not None else argv[:-1] + ["-p=<prompt>"]
         (LOG_DIR / f"{tag}.log").write_text(f"argv: {' '.join(shown)}\nrc={rc} {time.perf_counter() - t0:.1f}s\n"
                                             f"--- stdout\n{out}\n--- stderr\n{err}")
+        if rc == 127 and not waited:               # 실행 파일 없음: CLI 자동 업데이트 중이면 잠깐 없다. 다시 생길 때까지
+            waited = True                          # 최대 5분 기다리고 실패로 세지 않는다
+            for _ in range(20):
+                time.sleep(15)
+                if shutil.which(argv[0]):
+                    break
+            continue
         text = out_file.read_text() if v.get("output") == "file" and out_file.exists() else out
         new_id = sid
         if s and s["id"] == "jsonl":            # codex --json: 첫 이벤트 줄의 thread_id

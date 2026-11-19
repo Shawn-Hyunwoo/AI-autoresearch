@@ -34,7 +34,7 @@ budget:                           # 쓰는 트랙의 항목만 있으면 된다.
   bench_rounds: 3                 # (트랙 B) 수정 전과 수정 후를 번갈아 잴 횟수. 중앙값으로 비교한다
   call_timeout_min: null          # 모델 호출 한 번의 시간 제한(분). null이면 제한 없음
 stages:                           # 단계별 모델 배정. 쓰는 트랙의 단계는 모두 있어야 한다
-                                  # 아래 '다른 벤더' 규칙은 설치된 벤더가 하나뿐이면 '다른 모델'로 낮춰 적용된다
+                                  # 아래 '다른 벤더' 규칙은 이 표가 한 벤더만 쓰면 '다른 모델'로 낮춰 적용된다
   phase1_recon:
     slots:                        # role마다 prompts/phase1_<role>.md
       - {provider: claude, model: opus, effort: high, role: repo_scan}
