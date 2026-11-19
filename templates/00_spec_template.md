@@ -20,13 +20,13 @@ evaluation_contract:
   metric: "<비교하거나 개선할 지표 이름과 단위>"
   direction: "higher_is_better"   # 또는 lower_is_better
   min_improvement_pct: 1.0        # 트랙 B: 이보다 작은 개선은 측정 잡음으로 보고 버린다
-budget:
-  max_iterations: 15              # 트랙 A/B 시도 횟수 상한
-  max_crash_repairs: 3            # 비정상 종료 시 자동 수리 횟수
-  max_debate_rounds: 3            # 트랙 C 증명-반박 라운드
-  run_limits: {fable: 5, codex: 3}  # 실행 1회당 호출 상한 (키: 모델 별명 또는 벤더). 닿으면 슬롯의 after_quota → 벤더 대체 모델
-  seeds: 3                        # 트랙 A: 시도마다 run.sh를 AR_SEED=0..seeds-1로 돌려 평균과 표준오차를 낸다
-  bench_rounds: 3                 # 트랙 B: 수정 전과 수정 후를 번갈아 잴 횟수. 중앙값으로 비교한다
+budget:                           # 쓰는 트랙의 항목만 있으면 된다. 다른 트랙 항목은 지워도 된다
+  max_iterations: 15              # (트랙 A/B) 시도 횟수 상한
+  max_crash_repairs: 3            # (공통) 비정상 종료 시 자동 수리 횟수
+  max_debate_rounds: 3            # (트랙 C) 증명-반박 라운드
+  run_limits: {fable: 5, codex: 3}  # (공통) 실행 1회당 호출 상한 (키: 모델 별명 또는 벤더). 닿으면 슬롯의 after_quota → 벤더 대체 모델
+  seeds: 3                        # (트랙 A) 시도마다 run.sh를 AR_SEED=0..seeds-1로 돌려 평균과 표준오차를 낸다
+  bench_rounds: 3                 # (트랙 B) 수정 전과 수정 후를 번갈아 잴 횟수. 중앙값으로 비교한다
   call_timeout_min: null          # 모델 호출 한 번의 시간 제한(분). null이면 제한 없음
 stages:                           # 단계별 모델 배정. 쓰는 트랙의 단계는 모두 있어야 한다
   phase1_recon:

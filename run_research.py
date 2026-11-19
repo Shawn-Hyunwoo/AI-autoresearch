@@ -53,8 +53,9 @@ TRACKS = CFG["track"] if isinstance(CFG["track"], list) else [t.strip() for t in
 STAGES, BUDGET = CFG.get("stages") or {}, CFG.get("budget") or {}
 NEED = ["phase1_recon", "phase1_5_ideation", "crash_repair", "phase4_audit"] \
     + (["phase2_pilot"] if {"A", "B"} & set(TRACKS) else []) + [f"phase3_track_{t.lower()}" for t in TRACKS]
-NEED_BUDGET = ["max_iterations", "max_crash_repairs", "max_debate_rounds", "run_limits"] \
-    + (["seeds"] if "A" in TRACKS else []) + (["bench_rounds"] if "B" in TRACKS else [])
+NEED_BUDGET = ["max_crash_repairs", "run_limits"] + (["max_iterations"] if {"A", "B"} & set(TRACKS) else []) \
+    + (["seeds"] if "A" in TRACKS else []) + (["bench_rounds"] if "B" in TRACKS else []) \
+    + (["max_debate_rounds"] if "C" in TRACKS else [])   # 쓰는 트랙에 필요한 항목만 요구한다
 MISSING = [f"stages.{k}" for k in NEED if k not in STAGES] + [f"budget.{k}" for k in NEED_BUDGET if k not in BUDGET]
 if MISSING:
     raise SystemExit(f"명세에 빠진 항목: {', '.join(MISSING)} (templates/00_spec_template.md 참고)")
