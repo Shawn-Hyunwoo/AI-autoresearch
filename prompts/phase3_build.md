@@ -11,9 +11,10 @@
 
 만들 것:
 1. {{eval_dir}}/prepare.py: 고정된 입력, 데이터 분할, 테스트 인스턴스를 만들어 {{eval_dir}}/inputs/main/ 아래에 저장한다. 트랙 A가 포함되면 구간 탐색에 쓸 입력 변형(예: 표본 수, 노이즈 수준, 문제 크기)을 지금 미리 정해 변형마다 {{eval_dir}}/inputs/<regime 이름>/에 만든다. 본 실험에서는 여기 있는 regime만 채점된다. 기준 정답(레이블, 기대 출력 등 채점에만 쓰는 값)은 `os.environ["AR_HIDDEN_DIR"]/<regime 이름>/`에만 저장한다. 정답을 {{eval_dir}}나 저장소 안에 두지 않는다. 시드를 고정한다. 저장소에 검증된 로더가 있으면 그것을 감싸 쓴다.
+   트랙 A가 포함되면 최종 시험 세트도 만든다. 본 실험은 위 입력의 점수를 보며 시도를 고르고, 끝난 뒤 제어기가 최종 시험 세트로 한 번만 다시 잰다. regime마다 `$AR_HIDDEN_DIR/final/inputs/<regime 이름>/`에 위 입력과 같은 파일 이름과 형식으로 입력을 만들되, 평가 대상(테스트 표본, 문제 인스턴스)만 같은 방식으로 새로 뽑아 위 입력과 겹치지 않게 한다. 학습에 쓰는 데이터는 같게 둔다. 그 정답은 `$AR_HIDDEN_DIR/final/<regime 이름>/`에 둔다. 제어기는 이 입력을 {{eval_dir}}/inputs/ 자리에 잠시 바꿔 끼우고 같은 실험 코드를 돌린다. 평가 대상을 새로 뽑을 수 없는 문제(고정된 단일 인스턴스 등)면 같은 입력을 두고 그 이유를 prepare.py 주석에 적는다.
 2. {{eval_dir}}/metrics.py: 50줄 이내. `python metrics.py <result_dir> [regime]`로 실행된다(regime을 생략하면 main). result_dir의 결과 파일과 prepare.py가 만든 기준만 읽어 guard 통과 여부와 metric을 계산하고, stdout 마지막 줄에 JSON 한 줄을 출력한다:
    {"guard_pass": true, "guard_reason": "...", "primary_metric": 0.0, "direction": "higher_is_better|lower_is_better", "wall_time_sec": null, "secondary_metrics": {}}
-   기준 정답은 `os.environ["AR_HIDDEN_DIR"]`에서 읽는다. 모델 초기화, 학습, 알고리즘 실행은 하지 않는다.
+   기준 정답은 `os.environ["AR_HIDDEN_DIR"]`에서 읽는다. 모델 초기화, 학습, 알고리즘 실행은 하지 않는다. 트랙 A면 결과에 평가 대상의 id를 함께 쓰게 하고, 결과의 id가 정답의 id와 다르면 guard 실패로 처리한다(최종 시험에서 실험 코드가 다른 입력을 읽거나 저장해 둔 결과를 돌려주면 여기서 걸린다).
 3. {{eval_dir}}/test_gate.py: 기준 정답은 `AR_HIDDEN_DIR`에서 읽는다. 세 가지를 검사하고 모두 통과하면 exit 0, 하나라도 실패하면 exit 1. (a) 작은 정답 결과를 통과시킨다 (b) 일부러 만든 불량 결과를 기각한다 (c) SoTA 기준선 하나를 재현한다.
 4. 트랙 B가 포함되면 {{eval_dir}}/run_bench.sh: `bash run_bench.sh <result_dir>`로 실행되어, 작은 규모의 정확도(guard) 세트와 중대규모의 속도·메모리(metric) 세트를 차례로 돌려 result_dir에 결과를 쓴다. 이 파일은 잠기고, 이후에는 소스 코드만 바뀐다. 시간 측정이 호출 사이의 캐시에 속지 않게 한다: 워밍업은 측정 입력과 다른 입력으로 하고, 측정 입력으로는 한 번만 부른다. 같은 프로세스에서 같은 입력을 두 번 불러 두 번째 시간을 재지 않는다.
 5. 트랙 A가 포함되면 선별된 후보와 SoTA 기준선마다 {{pilot_dir}}/<id>/run.sh: `bash run.sh <result_dir>`로 실행되어 main 입력에서 가장 작은 규모로 돌고 result_dir에 metrics.py가 읽을 결과를 쓴다. 난수는 환경변수 `AR_SEED`(정수)를 시드로 쓴다. run.sh와 실험 코드는 AR_HIDDEN_DIR을 읽지 않는다. 실험 코드는 저장소 안에 새 모듈로 두는 것을 우선한다.

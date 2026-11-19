@@ -141,6 +141,7 @@ ENV.pop("PYTHONHOME", None)
 ENV.pop("AR_HIDDEN_DIR", None)
 SCORE_ENV = dict(ENV, AR_HIDDEN_DIR=str(HIDDEN))     # 제어기가 prepare.py, test_gate.py, metrics.py를 돌릴 때만
 BUILD_ENV = dict(ENV, AR_HIDDEN_DIR=str(SELFTEST))   # builder 에이전트의 자기 점검용
+FINAL_ENV = dict(ENV, AR_HIDDEN_DIR=str(HIDDEN / "final"))   # 트랙 A 최종 시험 채점용 (본 실험 동안은 쓰지 않는다)
 
 
 def visible_locks():
@@ -364,11 +365,14 @@ def run_once(script, res, seed=0):
     return rc, log, wall
 
 
-def score(res, wall, regime=None):
+def score(res, wall, regime=None, final=False):
     # metrics.py는 제어기만 돌리고, 이때만 숨긴 정답 경로를 넘긴다. regime은 prepare.py가 미리 만든 입력 변형의 이름
+    # final=True면 최종 시험 정답으로 채점한다. 입력을 바꿔 끼운 동안이라 잠금 확인은 부르는 쪽이 앞뒤로 한다
     # ponytail: 에이전트와 같은 리눅스 사용자라 정답 폴더를 일부러 찾아 읽는 것까지는 막지 못한다 (막으려면 별도 사용자나 컨테이너)
-    verify_locks()
-    r = sh([PY, str(EVAL / "metrics.py"), str(res)] + ([regime] if regime else []), check=False, env=SCORE_ENV)
+    if not final:
+        verify_locks()
+    r = sh([PY, str(EVAL / "metrics.py"), str(res)] + ([regime] if regime else []), check=False,
+           env=FINAL_ENV if final else SCORE_ENV)
     s = last_json(r.stdout) or {"guard_pass": False, "primary_metric": None,
                                  "guard_reason": f"metrics.py 출력 없음: {r.stderr[-300:]}"}
     s.setdefault("wall_time_sec", wall)
@@ -412,6 +416,19 @@ def case_table(cases):
                       f"{v.get('attempt', '')} |\n" for k, v in sorted(cases.items())))
 
 
+def summarize(per):
+    # 경우별 시드 결과 → 시드 평균, 평균의 표준오차. 모든 시드에서 guard를 통과해야 guard_pass
+    cases = {}
+    for name, runs in per.items():
+        vals = nums(runs)
+        cases[name] = {"guard_pass": all(r.get("guard_pass") for r in runs) and len(vals) == BUDGET["seeds"],
+                       "primary_metric": statistics.mean(vals) if vals else None,
+                       "spread": statistics.stdev(vals) / len(vals) ** 0.5 if len(vals) > 1 else None,
+                       "n_seeds": len(vals), "wall_time_sec": statistics.mean(nums(runs, "wall_time_sec") or [0]),
+                       "guard_reason": next((r.get("guard_reason", "") for r in runs if not r.get("guard_pass")), "")}
+    return cases
+
+
 def attempt_a(work):
     # 트랙 A 시도 1회: run.sh를 시드(AR_SEED)마다 돌리고, 경우(모델 × regime)마다 제어기가 채점해
     # 시드 평균과 평균의 표준오차를 낸다. 모든 경우가 모든 시드에서 guard를 통과해야 채택한다
@@ -425,19 +442,28 @@ def attempt_a(work):
             return {**s, "cases": {}}
         for name, sc in s["cases"].items():
             per.setdefault(name, []).append(sc)
-    cases = {}
-    for name, runs in per.items():
-        vals = nums(runs)
-        cases[name] = {"guard_pass": all(r.get("guard_pass") for r in runs) and len(vals) == BUDGET["seeds"],
-                       "primary_metric": statistics.mean(vals) if vals else None,
-                       "spread": statistics.stdev(vals) / len(vals) ** 0.5 if len(vals) > 1 else None,
-                       "n_seeds": len(vals), "wall_time_sec": statistics.mean(nums(runs, "wall_time_sec") or [0]),
-                       "guard_reason": next((r.get("guard_reason", "") for r in runs if not r.get("guard_pass")), "")}
+    cases = summarize(per)
     (work / "comparison.md").write_text(case_table(cases))   # 제어기가 채점한 이번 시도의 경우별 비교표
     out = {"status": "ok", "cases": cases, "guard_pass": all(v["guard_pass"] for v in cases.values()),
            "guard_reason": next((f"{k}: {v['guard_reason']}" for k, v in cases.items() if not v["guard_pass"]), "")}
     (work / "score.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
     return out
+
+
+def bench_pair(work, commits, rounds):
+    # 커밋 둘을 라운드마다 순서를 바꿔 번갈아 잰다(순서 효과를 줄인다). 반환: {이름: [채점 결과, ...]}
+    runs, order = {k: [] for k in commits}, list(commits)
+    for r in range(rounds):
+        for label in (order if r % 2 == 0 else order[::-1]):
+            git("checkout", "-q", "--detach", commits[label])
+            d = work / f"round_{r + 1}_{label}"
+            rc, log, wall = run_once(EVAL / "run_bench.sh", d / "result")
+            sc = score(d / "result", wall) if rc == 0 else {
+                "guard_pass": False, "primary_metric": None, "guard_reason": f"측정 중 비정상 종료: {log[-200:]}"}
+            (d / "score.json").write_text(json.dumps(sc, ensure_ascii=False, indent=2))
+            runs[label].append(sc)
+    git("checkout", "-q", BRANCH)                       # 작업 브랜치는 마지막 커밋(트랙 B 시도면 후보)을 가리킨다
+    return runs
 
 
 def attempt_b(work):
@@ -448,19 +474,7 @@ def attempt_b(work):
         return s
     git("add", "-A")
     git("commit", "--allow-empty", "-q", "-m", "candidate (측정 중)")
-    cand, best = git("rev-parse", "HEAD"), STATE["best_commit"]
-    runs = {"cand": [], "best": []}
-    for r in range(BUDGET["bench_rounds"]):
-        order = [("cand", cand), ("best", best)] if r % 2 == 0 else [("best", best), ("cand", cand)]
-        for label, commit in order:
-            git("checkout", "-q", "--detach", commit)
-            d = work / f"round_{r + 1}_{label}"
-            rc, log, wall = run_once(EVAL / "run_bench.sh", d / "result")
-            sc = score(d / "result", wall) if rc == 0 else {
-                "guard_pass": False, "primary_metric": None, "guard_reason": f"측정 중 비정상 종료: {log[-200:]}"}
-            (d / "score.json").write_text(json.dumps(sc, ensure_ascii=False, indent=2))
-            runs[label].append(sc)
-    git("checkout", "-q", BRANCH)                       # 작업 브랜치는 후보 커밋을 가리킨다
+    runs = bench_pair(work, {"cand": git("rev-parse", "HEAD"), "best": STATE["best_commit"]}, BUDGET["bench_rounds"])
     cv, bv = nums(runs["cand"]), nums(runs["best"])
     cm = statistics.median(cv) if cv else None
     bm = statistics.median(bv) if bv else None
@@ -692,8 +706,16 @@ def harness_check():
         r1 = sh([PY, str(EVAL / "prepare.py")], cwd=EVAL, check=False, env=SCORE_ENV)
         r2 = sh([PY, str(EVAL / "test_gate.py")], cwd=EVAL, check=False, env=SCORE_ENV) if r1.returncode == 0 else r1
         log = f"[prepare.py rc={r1.returncode}]\n{r1.stdout}{r1.stderr}\n[test_gate.py rc={r2.returncode}]\n{r2.stdout}{r2.stderr}"
+        miss = []
+        if "A" in TRACKS and r2.returncode == 0:        # 트랙 A는 regime마다 최종 시험 입력과 정답도 있어야 한다
+            regs = sorted(p.name for p in (EVAL / "inputs").glob("*") if p.is_dir()) or ["main"]
+            miss = [name for r in regs for name, d in ((f"{EVAL}/inputs/{r}", EVAL / "inputs" / r),
+                                                       (f"$AR_HIDDEN_DIR/final/inputs/{r}", HIDDEN / "final" / "inputs" / r),
+                                                       (f"$AR_HIDDEN_DIR/final/{r}", HIDDEN / "final" / r)) if not d.is_dir()]
+            if miss:
+                log += "\n[제어기 점검] 트랙 A 입력 또는 최종 시험 폴더 없음: " + ", ".join(miss)
         (OUT / "03_pilot" / "test_gate.log").write_text(log)
-        if r1.returncode == 0 and r2.returncode == 0:
+        if r1.returncode == 0 and r2.returncode == 0 and not miss:
             return
         if attempt < BUDGET["max_crash_repairs"]:
             repair(OUT / "03_pilot", f"cd {EVAL} && python prepare.py && python test_gate.py", log, attempt + 1)
@@ -796,7 +818,7 @@ def phase_track_ab(track):
         s = run_case(MAIN / "B_iter_00_baseline", EVAL / "run_bench.sh")
         if not s.get("guard_pass"):
             raise RuntimeError("수정 전 코드가 guard를 통과하지 못함. 평가 하네스를 확인하세요")
-        T["best_metric"] = s["primary_metric"]
+        T["best_metric"], T["start_commit"] = s["primary_metric"], STATE["best_commit"]
         row(0, STATE["best_commit"][:9], "keep", s, None, "수정 전 기준 측정")
         save_state()
 
@@ -847,7 +869,8 @@ def phase_track_ab(track):
                 git("commit", "--amend", "--allow-empty", "-q", "-m", f"B iter {it}: {summary[:60]}")
             STATE["best_commit"] = git("rev-parse", "HEAD")
             if track == "A":                            # 채택된 시도의 경우를 누적표에 합친다 (같은 경우는 최신 값으로)
-                T.setdefault("cases", {}).update({k: {**v, "attempt": f"A{it}"} for k, v in s["cases"].items()})
+                T.setdefault("cases", {}).update({k: {**v, "attempt": f"A{it}", "commit": STATE["best_commit"]}
+                                                 for k, v in s["cases"].items()})
                 (MAIN / "comparison_all.md").write_text(case_table(T["cases"]))
             if track == "B" and (T["best_metric"] is None or (delta or 0) > 0):   # 트랙 A는 경우별 표(comparison.md)로 본다
                 T["best_metric"] = s["primary_metric"]
@@ -874,6 +897,84 @@ def phase_track_ab(track):
         save_state()
         if re.search(r"^NEXT:\s*done", text, re.M | re.I) and it >= len(cands):   # 후보가 남아 있으면 done을 무시
             break
+
+
+# ---- Phase 4 끝: 결론 수치를 위한 마지막 측정 (모델 호출 없음)
+def phase_final_test_a():
+    # 본 실험은 검증 입력의 점수를 보며 시도를 고르므로 그 점수는 실제보다 좋게 나온다. 끝난 뒤 한 번만,
+    # 누적표의 경우마다 그 값을 낸 시도의 코드(커밋과 run.sh)를 처음 보는 최종 시험 입력과 새 시드로 다시 채점한다.
+    # 최종 입력은 검증 입력 자리(inputs/)에 잠시 바꿔 끼운다. 실험 코드는 그대로 두고, 수리도 하지 않는다
+    val, fin, park = EVAL / "inputs", HIDDEN / "final" / "inputs", EVAL / "inputs_val"
+    if park.exists():                                   # 바꿔 끼운 채로 끊긴 실행이면 먼저 되돌린다
+        if val.exists() and not fin.exists():
+            val.rename(fin)
+        park.rename(val)
+    cases = STATE["track_A"].get("cases") or {}
+    if not cases:
+        (MAIN / "final_test.md").write_text("채택된 시도가 없어 최종 시험을 하지 않았다.\n")
+        return
+    verify_locks()
+    groups = {}
+    for name, c in cases.items():
+        groups.setdefault((c["attempt"], c.get("commit") or STATE["best_commit"]), []).append(name)
+    per, base, seeds = {}, MAIN / "final_test", [1000 + sd for sd in range(BUDGET["seeds"])]
+    shutil.rmtree(base, ignore_errors=True)
+    val.rename(park)
+    fin.rename(val)
+    try:
+        for (att, commit), names in sorted(groups.items()):
+            git("checkout", "-q", "-f", "--detach", commit)
+            git("clean", "-fd")
+            for sd in seeds:
+                res = base / att / f"seed_{sd}" / "result"
+                rc, log, wall = run_once(MAIN / f"A_iter_{int(att[1:]):02d}" / "run.sh", res, sd)
+                (res.parent / "run.log").write_text(log)
+                for n in names:
+                    per.setdefault(n, []).append(
+                        score(res / n, wall, n.split("@", 1)[1] if "@" in n else None, final=True)
+                        if rc == 0 and (res / n).is_dir() else
+                        {"guard_pass": False, "primary_metric": None,
+                         "guard_reason": f"비정상 종료: {log[-200:]}" if rc else "경우 폴더 없음"})
+    finally:
+        val.rename(fin)
+        park.rename(val)
+        git("checkout", "-q", "-f", BRANCH)
+        git("clean", "-fd")
+    verify_locks()
+    fc = summarize(per)
+    (MAIN / "final_test.json").write_text(json.dumps(fc, ensure_ascii=False, indent=2))
+    m = CONTRACT.get("metric", "metric")
+    (MAIN / "final_test.md").write_text(
+        f"최종 시험 (본 실험에서 채점하지 않은 입력, 시드 {seeds[0]}~{seeds[-1]})\n\n"
+        f"| 경우 | 검증 {m} 평균 | 최종 시험 {m} 평균 | 최종 표준오차 | 시드 수 | guard | 시도 |\n|---|---|---|---|---|---|---|\n"
+        + "".join(f"| {k} | {cases[k]['primary_metric']} | {v['primary_metric']} | {v['spread']} | {v['n_seeds']} | "
+                  f"{v['guard_pass']} | {cases[k]['attempt']} |\n" for k, v in sorted(fc.items())))
+
+
+def phase_confirm_b():
+    # 시도마다 '그때의 최고' 대비로 채택하므로, 측정 잡음으로 우연히 좋게 나온 채택이 쌓이면 개선 폭이 부풀려진다.
+    # 끝난 뒤 한 번만, 수정 전 코드와 최종 코드를 번갈아 재서(라운드는 시도 때의 두 배) 중앙값을 비교한다
+    T = STATE["track_B"]
+    start, best = T["start_commit"], STATE["best_commit"]
+    if start == best:
+        (MAIN / "B_confirm.md").write_text("채택된 시도가 없어 최종 비교를 하지 않았다.\n")
+        return
+    work, rounds = MAIN / "B_confirm", 2 * BUDGET["bench_rounds"]
+    shutil.rmtree(work, ignore_errors=True)
+    runs = bench_pair(work, {"original": start, "final": best}, rounds)
+    med = {k: statistics.median(nums(v)) if nums(v) else None for k, v in runs.items()}
+    ok = {k: all(x.get("guard_pass") for x in v) for k, v in runs.items()}
+    out = {"original_commit": start, "final_commit": best, "rounds": rounds, "original_median": med["original"],
+           "final_median": med["final"], "delta_pct": pct(med["final"], med["original"]), "final_guard_pass": ok["final"],
+           "values": {k: nums(v) for k, v in runs.items()}}
+    (MAIN / "B_confirm.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
+    m = CONTRACT.get("metric", "metric")
+    (MAIN / "B_confirm.md").write_text(
+        f"최종 비교 (수정 전 코드와 최종 코드를 번갈아 {rounds}번씩 잰 중앙값)\n\n"
+        f"| 코드 | 커밋 | {m} 중앙값 | 측정값 | guard |\n|---|---|---|---|---|\n"
+        + "".join(f"| {name} | {c[:9]} | {med[k]} | {nums(runs[k])} | {ok[k]} |\n"
+                  for name, k, c in (("수정 전", "original", start), ("최종", "final", best)))
+        + f"\n개선 폭 (좋아진 쪽이 양수): {out['delta_pct']}%\n")
 
 
 # ---- Phase 4 트랙 C: 증명 ↔ 반박·반례 탐색을 라운드로 반복
@@ -935,8 +1036,9 @@ def phase_audit():
     files = sorted(str(p.relative_to(REPO)) for p in OUT.rglob("*")
                    if p.is_file() and p.suffix in (".json", ".tsv", ".csv", ".log", ".md", ".py", ".sh"))
     verdicts = "\n".join(f"{p.name}: {p.read_text()}" for p in sorted(MAIN.glob("round_*_verdict.json"))) or "없음"
+    final = "\n\n".join(read(MAIN / f) for f in ("final_test.md", "B_confirm.md") if (MAIN / f).exists()) or "없음"
     ctx = dict(spec=SPEC_TEXT, tracks=",".join(TRACKS), files="\n".join(files[:400]), results=tail(MAIN / "results.tsv", 80),
-               verdicts=verdicts, selected=read(OUT / "02_ideation" / "02_selected.json"), out_dir=OUT)
+               verdicts=verdicts, selected=read(OUT / "02_ideation" / "02_selected.json"), out_dir=OUT, final=final)
     texts = parallel([(s, prompt("phase5_audit.md", **ctx), OUT / "05_audit" / f"auditor_{i:02d}.md", "readonly", True)
                       for i, s in enumerate(st["auditors"], 1)])
     (OUT / "05_audit.md").write_text("\n\n".join(
@@ -1079,6 +1181,10 @@ if {"A", "B"} & set(TRACKS):
     PHASES += [("pilot", phase_pilot), ("gate_pilot", phase_gate_pilot)]
 for t in TRACKS:
     PHASES.append((f"track_{t}", phase_track_c if t == "C" else (lambda t=t: phase_track_ab(t))))
+    if t == "A":
+        PHASES.append(("final_test_A", phase_final_test_a))
+    if t == "B":
+        PHASES.append(("confirm_B", phase_confirm_b))
 PHASES += [("audit", phase_audit), ("final", phase_final)]
 
 save_state()

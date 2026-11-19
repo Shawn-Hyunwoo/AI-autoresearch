@@ -23,7 +23,7 @@
 - 원본 저장소의 브랜치는 건드리지 않습니다. 실행마다 클론을 만들고 그 안에서만 작업합니다. 원본에는 마지막에 사람이 승인할 때 새 브랜치 하나만 생깁니다.
 - 코드를 고치는 단계만 권한 전체 허용으로 부릅니다. 조사, 비평, 감사처럼 읽고 쓰기만 하는 단계는 읽기 전용입니다.
 - 실험 실행과 채점은 에이전트가 아니라 제어기가 합니다. 채점 파일은 잠그고 SHA-256 해시로 바뀌었는지 매번 확인합니다. 채점 정답은 클론 밖(`hidden/`)에 두고 채점할 때만 경로를 넘깁니다.
-- 한 번 재고 끝내지 않습니다. 트랙 A는 시드를 바꿔 여러 번 돌려 평균과 표준오차를, 트랙 B는 수정 전과 수정 후를 번갈아 여러 번 재 중앙값을 비교합니다.
+- 한 번 재고 끝내지 않습니다. 트랙 A는 시드를 바꿔 여러 번 돌려 평균과 표준오차를, 트랙 B는 수정 전과 수정 후를 번갈아 여러 번 재 중앙값을 비교합니다. 결론 수치는 본 실험이 끝난 뒤 한 번 더 잰 값입니다. 트랙 A는 본 실험 동안 채점하지 않은 최종 시험 세트로, 트랙 B는 원래 코드와 최종 코드를 직접 번갈아 재서 냅니다.
 - 글을 쓰는 모델과 반박·감사하는 모델은 다른 회사 모델로 둡니다.
 
 ### 파일은 어디에 있나
@@ -142,7 +142,7 @@ Five rules:
 - The original repository's branches are never touched. Each run works inside its own clone. The original only gets one new branch at the end, after you approve.
 - Only the code-editing stages run with full permissions. Stages that only read and write text (survey, critique, audit) run read-only.
 - The controller, not the agent, runs the experiments and scores them. The scoring files are locked and their SHA-256 hashes are checked before every scoring. Reference answers live outside the clone (`hidden/`) and their path is passed only to the scoring scripts.
-- Nothing is measured once. Track A runs each attempt over several seeds and reports the mean and its standard error; track B measures the old and new code alternately several times and compares medians.
+- Nothing is measured once. Track A runs each attempt over several seeds and reports the mean and its standard error; track B measures the old and new code alternately several times and compares medians. The headline numbers come from one more measurement after the main loop: track A reruns the kept cases on a final test set that was never scored during the loop, and track B measures the original code against the final code directly.
 - The model that writes and the model that refutes or audits come from different vendors.
 
 ### Where the files live
