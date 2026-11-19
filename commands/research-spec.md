@@ -28,10 +28,10 @@ argument-hint: <연구 질문>
    - setup_cmds, build_cmd: README와 빌드 파일(pyproject.toml, setup.py, CMakeLists.txt 등)을 보고 정한다. 필요 없으면 비운다.
    - push_remote: 원본 저장소의 원격 이름.
    - evaluation_contract: 질문에서 guard(깨지면 안 되는 조건)와 metric(지표와 방향)을 정한다. 트랙 B면 min_improvement_pct도 정한다.
-   - budget: 기본값을 쓴다. 쓰는 트랙에 필요한 항목만 적는다. 공통은 max_crash_repairs, run_limits. 트랙 A·B는 max_iterations, 트랙 A는 seeds, 트랙 B는 bench_rounds, 트랙 C는 max_debate_rounds. call_timeout_min은 선택이다.
+   - budget: 기본값을 쓴다. 쓰는 트랙에 필요한 항목만 적는다. 공통은 max_crash_repairs, run_limits, max_ideation_rounds(Phase 2 아이디어 토론의 최대 회차, 기본 1). 트랙 A·B는 max_iterations, 트랙 A는 seeds, 트랙 B는 bench_rounds, 트랙 C는 max_debate_rounds. call_timeout_min은 선택이다.
    - stages: 기본값을 쓴다. 쓰는 트랙의 단계를 빠짐없이 적는다. 모델과 추론 단계는 providers.yaml에 있는 것만 쓴다.
 3. 사용자가 준 값을 연구 주제와 견주어 본다. 어긋나 보이는 값만 이유 한 줄과 함께 확인받는다. 이상한 점이 없으면 이 단계를 건너뛴다. 확인할 만한 예:
-   - 모델 배정이 일의 무게와 맞지 않는다. 조사는 강한 모델인데 구현, 수리, 본 실험, 반박, 감사는 약한 모델이거나 낮은 추론 단계인 경우. 트랙 C의 증명이나 반박을 낮은 추론 단계로 두는 경우.
+   - 모델 배정이 일의 무게와 맞지 않는다. 조사는 강한 모델인데 구현, 수리, 본 실험, 반박, 감사는 약한 모델이거나 낮은 추론 단계인 경우. critic이 짝지을 diverger보다 약한 경우(critic이 후보의 채택과 탈락을 정한다). 트랙 C의 증명이나 반박을 낮은 추론 단계로 두는 경우.
    - 트랙이 질문과 맞지 않는다.
    - 시도 횟수, 시드 수, 라운드 수, 호출 상한이 주제에 비해 너무 작거나 크다.
    - guard나 metric이 질문에 답하지 못하거나 계산할 수 없다.
@@ -41,7 +41,7 @@ argument-hint: <연구 질문>
    ```
    트랙 A. source_repo 이 폴더, base_branch main, base_env <env>, setup_cmds·build_cmd·copy_inputs 없음, push_remote origin.
    guard: <조건>. metric: <지표>, higher_is_better.
-   budget: max_iterations 15, max_crash_repairs 3, seeds 3, run_limits {fable: 5, codex: 3}.
+   budget: max_iterations 15, max_crash_repairs 3, seeds 3, run_limits {fable: 5, codex: 3}, 아이디어 토론 1회(기본, 늘릴 수 있음).
    모델: <단계별 배정 한두 줄 요약>
    ```
    사용자가 그대로 받으면 6번으로 간다. 고쳤으면 고친 결과를 10줄 이내로 요약해 "이대로 쓸까요?"를 묻는다(둘째 문답). 사용자가 모든 값을 줬고 어긋난 값도 없으면 첫째 문답 대신 이 요약만 보여 주고 묻는다.

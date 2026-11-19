@@ -23,6 +23,9 @@ evaluation_contract:
 budget:                           # 쓰는 트랙의 항목만 있으면 된다. 다른 트랙 항목은 지워도 된다
   max_iterations: 15              # (트랙 A/B) 시도 횟수 상한
   max_crash_repairs: 3            # (공통) 비정상 종료 시 자동 수리 횟수
+  max_ideation_rounds: 1          # (공통, 생략하면 1) Phase 2 아이디어 토론의 최대 회차. 1이면 제안 한 번, 비평 한 번.
+                                  #   N이면 보완 요청이 남지 않을 때까지 최대 N회 주고받고, N회차 비평은 채택·탈락만 낸다.
+                                  #   호출은 많아야 N × 2 × (diverger 수)회
   max_debate_rounds: 3            # (트랙 C) 증명-반박 라운드
   run_limits: {fable: 5, codex: 3}  # (공통) 실행 1회당 호출 상한 (키: 모델 별명 또는 벤더). 닿으면 슬롯의 after_quota → 벤더 대체 모델
   seeds: 3                        # (트랙 A) 시도마다 run.sh를 AR_SEED=0..seeds-1로 돌려 평균과 표준오차를 낸다
@@ -34,14 +37,13 @@ stages:                           # 단계별 모델 배정. 쓰는 트랙의 �
       - {provider: claude, model: opus, effort: high, role: repo_scan}
       - {provider: agy, model: neon, effort: high, role: lit_search}
   phase2_ideation:
-    critics_mode: all             # all: 모든 비평자가 전 후보 | shard: 후보를 나눠 맡음
-    divergers:                    # 같은 모델을 여러 줄 넣을 때는 lens: "통계물리 관점"처럼 관점을 붙인다
+    divergers:                    # 아이디어를 내는 모델. 같은 모델을 여러 줄 넣을 때는 lens: "통계물리 관점"처럼 관점을 붙인다
       - {provider: claude, model: fable, effort: high}
       - {provider: claude, model: opus, effort: xhigh}
       - {provider: agy, model: neon, effort: xhigh}
-    critics:
-      - {provider: agy, model: neon, effort: high}
-      - {provider: codex, model: sol, effort: high}
+    critics:                      # diverger마다 한 명씩 1:1로 짝지어 토론한다. 다른 벤더를 먼저 짝짓는다.
+      - {provider: agy, model: neon, effort: xhigh}    # critic이 채택·탈락을 정하므로 diverger보다 약하지 않게 둔다
+      - {provider: codex, model: sol, effort: xhigh}
     selector: {provider: claude, model: opus, effort: xhigh}
   phase3_pilot:
     builder: {provider: claude, model: opus, effort: high}
