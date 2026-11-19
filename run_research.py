@@ -715,7 +715,9 @@ def remote_is_private(remote):
 
 
 def phase_final():
-    say(f"[{RUN_ID}] 완료. 보고서: {OUT / '05_report.md'}\n\n{read(OUT / '05_report.md')[:3000]}")
+    rep = read(OUT / "05_report.md")
+    heads = [m.start() for m in re.finditer(r"^## ", rep, re.M)]   # 알림에는 결론 절(첫 절)까지만 보낸다
+    say(f"[{RUN_ID}] 완료\n보고서: {OUT / '05_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}")
     if ask(f"보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
         raise Stop("push 보류. 나중에 --resume으로 다시 묻습니다")
     final = f"{BRANCH}-final"
@@ -772,7 +774,7 @@ except Stop as e:
     say(f"[{RUN_ID}] 멈춤 (단계 {STATE['phase']}): {e}")
 except Exception:
     STATE["status"] = "FAILED"
-    say(f"[{RUN_ID}] 오류로 멈춤 (단계 {STATE['phase']}). 고친 뒤 --resume\n{traceback.format_exc()[-1500:]}")
+    say(f"[{RUN_ID}] 오류로 멈춤 (단계 {STATE['phase']}). 고친 뒤 --resume\n```\n{traceback.format_exc()[-1500:]}\n```")
     raise
 finally:
     save_state()
