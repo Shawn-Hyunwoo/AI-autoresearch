@@ -978,6 +978,9 @@ def phase_confirm_b():
 
 
 # ---- Phase 4 트랙 C: 증명 ↔ 반박·반례 탐색을 라운드로 반복
+HUNT_CATS = ("extreme", "singular", "equality", "typical")   # 양극단, 특이점, 등호 근처, 무던한 값
+
+
 def run_hunter(rd):
     script = rd / "counterexample_hunter.py"
     for attempt in range(BUDGET["max_crash_repairs"] + 1):
@@ -986,10 +989,17 @@ def run_hunter(rd):
         (rd / "hunter.log").write_text(log)
         j = last_json(r.stdout) if r and r.returncode == 0 else None
         if j:
-            return {k: j.get(k) for k in ("tested_cases", "counterexamples_found", "worst_counterexample", "tightness_ok")}
+            # 네 범주를 모두 시험해야 한다. 등호 근처는 등호가 성립하는 입력이 없다는 이유를 적으면 0이어도 된다
+            cats = j.get("by_category") if isinstance(j.get("by_category"), dict) else {}
+            miss = [c for c in HUNT_CATS if not (isinstance(cats.get(c), int) and cats[c] > 0)
+                    and not (c == "equality" and j.get("no_equality_reason"))]
+            return {**{k: j.get(k) for k in ("tested_cases", "counterexamples_found", "worst_counterexample",
+                                              "tightness_ok", "no_equality_reason")},
+                    "by_category": cats, "coverage_missing": miss}
         if attempt < BUDGET["max_crash_repairs"]:
             repair(rd, f"cd {rd} && python counterexample_hunter.py", log, attempt + 1)
-    return {"tested_cases": 0, "counterexamples_found": None, "worst_counterexample": None, "tightness_ok": False}
+    return {"tested_cases": 0, "counterexamples_found": None, "worst_counterexample": None, "tightness_ok": False,
+            "coverage_missing": list(HUNT_CATS)}
 
 
 def phase_track_c():
@@ -1008,7 +1018,8 @@ def phase_track_c():
             rd / "proof.md", "readonly")
         try:
             _, logic = agent_json("C_refuter", st["refuter"], prompt(
-                "track_c_refute.md", n=n, spec=SPEC_TEXT, proof=proof, round_dir=rd, known=read(OUT / "01_recon.md")),
+                "track_c_refute.md", n=n, spec=SPEC_TEXT, proof=proof, round_dir=rd, known=read(OUT / "01_recon.md"),
+                prev_missing=", ".join((C["verdict"] or {}).get("coverage_missing") or []) or "없음"),
                 rd / "refute.md", "full", parse_verdict, VERDICT_SCHEMA)
         except ValueError:
             logic = {"logic_sound": False, "fatal_flaws": ["반박 모델의 판정 JSON을 다시 요청해도 받지 못함"]}
@@ -1017,13 +1028,13 @@ def phase_track_c():
         C["verdict"] = v
         save_state()
         if v["logic_sound"] and v["counterexamples_found"] == 0 and (v["tested_cases"] or 0) > 0 \
-                and v["scope_realistic"] and v["non_trivial"] and v["tightness_ok"]:
+                and v["scope_realistic"] and v["non_trivial"] and v["tightness_ok"] and not v["coverage_missing"]:
             return
     v = C["verdict"]
     if not v["logic_sound"] or v["counterexamples_found"] != 0 or not v["tested_cases"]:
         raise Stop(f"트랙 C 기각: 논리 결함 또는 수치 반례\n{json.dumps(v, ensure_ascii=False)}")
     last = MAIN / f"C_round_{C['round']:02d}"
-    say(f"[{RUN_ID}] 트랙 C: 논리와 수치 반례 검사는 통과했지만 일반성·비자명성·밀착도에서 이견이 남음.\n"
+    say(f"[{RUN_ID}] 트랙 C: 논리와 수치 반례 검사는 통과했지만 일반성·비자명성·밀착도·반례 탐색 범위 중 통과하지 못한 것이 있음.\n"
         f"판정: {json.dumps(v, ensure_ascii=False)}\n\n증명 앞부분:\n{read(last / 'proof.md')[:1500]}\n\n"
         f"반박 요지:\n{read(last / 'refute.md')[-1500:]}")
     if ask("Enter: Phase 5 감사 진행 | q: 폐기하고 종료 > ").lower() == "q":
@@ -1044,6 +1055,12 @@ def phase_audit():
     (OUT / "05_audit.md").write_text("\n\n".join(
         f"# auditor_{i:02d} ({s['provider']}/{s['model']}/{s['effort']})\n\n{t}"
         for i, (s, t) in enumerate(zip(st["auditors"], texts), 1)))
+    fatal = {}                                          # 감사자별 치명 지적. 형식을 못 받으면 None (완료 알림에서 확인하라고 띄운다)
+    for i, (s, t) in enumerate(zip(st["auditors"], texts), 1):
+        j = last_json(t)
+        fatal[f"auditor_{i:02d} ({s['provider']}/{s['model']})"] = \
+            [str(x) for x in j["fatal"]] if isinstance(j, dict) and isinstance(j.get("fatal"), list) else None
+    (OUT / "05_audit" / "fatal.json").write_text(json.dumps(fatal, ensure_ascii=False, indent=2))
     verify_locks()
     agent("reporter", st["reporter"], prompt("phase5_report.md", **ctx, critique=read(OUT / "05_audit.md"),
                                              notes=tail(MAIN / "notes.md", 80), env=read(OUT / "env.txt")[:3000]),
@@ -1141,8 +1158,12 @@ def remote_is_private(remote):
 def phase_final():
     rep = read(OUT / "06_report.md")
     heads = [m.start() for m in re.finditer(r"^## ", rep, re.M)]   # 알림에는 결론 절(첫 절)까지만 보낸다
-    say(f"[{RUN_ID}] 완료\n보고서: {OUT / '06_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}")
-    if ask(f"보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
+    fatal = json.loads(read(OUT / "05_audit" / "fatal.json", "{}"))   # 결론만 보고 push하지 않게 감사의 치명 지적을 함께 띄운다
+    items = [f"- {who}: {x}" for who, xs in fatal.items() for x in xs or []]
+    warn = (f"감사 치명 지적 {len(items)}개 (reporter의 판단은 보고서 4절)\n" + "\n".join(items) + "\n\n" if items else "") \
+        + "".join(f"{who}: 치명 지적 목록을 형식대로 받지 못함. 05_audit.md 확인\n\n" for who, xs in fatal.items() if xs is None)
+    say(f"[{RUN_ID}] 완료\n{warn}보고서: {OUT / '06_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}")
+    if ask(f"{f'감사 치명 지적 {len(items)}개가 있습니다. ' if items else ''}보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
         raise Stop("push 보류. 나중에 --resume으로 다시 묻습니다", by_user=True)
     final = f"{BRANCH}-final"
     git("checkout", "-q", BRANCH)
