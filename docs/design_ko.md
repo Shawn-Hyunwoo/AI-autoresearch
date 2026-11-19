@@ -355,7 +355,7 @@ Phase 3 주력 모델과 다른 계열의 모델(제어기가 시작할 때 검�
 
 ### 마무리: 보고서 확인과 원본으로 push
 
-제어기가 보고서 경로와 앞부분을 Slack과 tmux에 띄우고 push 여부를 묻는다. `N`이면 멈추고, 나중에 `--resume`으로 다시 묻는다. `y`면 다음 순서로 진행한다.
+제어기가 보고서 경로와 결론 절을 Slack과 tmux에 띄우고 push 여부를 묻는다. `N`이면 멈추고, 나중에 `--resume`으로 다시 묻는다. `y`면 다음 순서로 진행한다.
 
 1. 시도별 커밋 이력은 클론에만 남긴다. 원본에는 (최고 커밋의 코드 + 산출물 폴더 `research_runs/<run_id>/`)를 기준 커밋 위의 커밋 하나로 보낸다. 브랜치를 checkout하지 않고 임시 index로 커밋을 만든다(checkout하면 산출물 폴더가 작업 트리에서 지워질 수 있다).
 2. 커밋 전에 산출물 텍스트의 절대경로를 `<repo>`, `<env>`, `<run>`, `~`로 바꾼다.
@@ -516,7 +516,7 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 
 1. 명세 확정 (대화형): 원본 프로젝트 폴더에서 `claude`를 열고 `/research-spec <연구 질문>`으로 문답해 `~/autoresearch_runs/<프로젝트>/<run_id>/00_spec.md`를 확정한다. 프로젝트에서 늘 같은 값은 `<프로젝트>/.autoresearch/defaults.yaml`에 적어 두면 Phase 0이 그 값으로 명세를 채운다.
 2. 무인 실행 시작 (`tmux`): `tmux new -s research` 세션 안에서 PyYAML이 있는 python으로 `python ~/autoresearch/run_research.py --spec ~/autoresearch_runs/<프로젝트>/<run_id>/00_spec.md`를 실행한다.
-3. 중간 확인: 파일럿 뒤 채점기 확인(트랙 A/B), 트랙 C의 일반성 이견, 보고서 뒤 push 확인에서만 Slack 알림이 울리고 멈춘다. `tmux attach -t research`로 들어가 입력한 뒤 빠져나온다.
+3. 중간 확인: 파일럿 뒤 채점기 확인(트랙 A/B), 트랙 C의 일반성 이견, 보고서 뒤 push 확인에서 멈춘다. 앞의 두 곳과 보고서 완성은 Slack으로 알린다(부록 A.3). `tmux attach -t research`로 들어가 입력한 뒤 빠져나온다.
 4. 재개: 오류, 멈춤, 세션 종료 뒤에는 같은 명령에 `--resume`을 붙인다.
 
 ## 8. 구현 상태 (2026-11-19)
@@ -524,7 +524,8 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 - 완료: 1단계(`00_spec.md` 템플릿과 `/research-spec` 명령), 2단계(서버 CLI 실측 기반 `providers.yaml`, `llm_router.py`, `notify.py`), 3단계(Phase 1, 1.5, 2와 `state.json` 체크포인트), 4단계(트랙 A/B/C 실행기, Phase 4 감사, push 관문)의 뼈대.
 - 확인한 것: 8개 모델 ID의 `reply ok` 응답, agy의 프롬프트 전달 방식, venv 방식의 우선순위와 보호, 라우터의 상한·대체·승격 계산(모델 호출 없이). 모델 호출을 가짜 응답으로 바꾼 모의 실행으로 트랙 A/B/C, 파일럿 관문, crash 수리, JSON 재요청, 교대 측정, 정답 숨김, push 단계, `--resume`까지 제어 흐름 전체(2026-11-19).
 - 확인하지 않은 것: 읽기 전용 단계에서 도구 승인이 필요해졌을 때의 동작(claude `--permission-mode dontAsk`는 거부할 것으로 보지만 미확인, agy `--sandbox`는 승인을 기다리며 멈출 수도 있음), 파이프라인 전체 실행.
-- 다음: 작은 장난감 프로젝트로 전체 흐름 점검, Slack 웹훅 연동.
+- 실제 모델 장난감 실행(2026-11-19): 트랙 B(소수 개수 세기 속도 개선)를 세 번 돌렸다. 한 번에 6~7분, 호출 11~13번이었다. 이 실행들에서 드러난 결함(트랙 B가 선별 후보를 무시함, 측정이 캐시에 속을 수 있음, 트랙 B·C에 양자 근거를 요구함)을 고쳤다.
+- Slack 웹훅 연동 완료(부록).
 
 ## Appendix: 원격 서버 개인 Slack 웹훅 알림 연동 절차
 
@@ -535,7 +536,7 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 공용 워크스페이스에 앱 추가 제한이 있는 경우 본인 이메일로 무료 개인 Slack 워크스페이스를 하나 생성해 휴대폰과 PC Slack 앱에 추가해 둔다.
 
 1. 알림을 받을 본인 전용 비공개 채널(예: `#research-alert`)을 생성한다.
-2. 브라우저에서 https://api.slack.com/apps 에 접속한 뒤 **Create New App** -> **From scratch**를 선택하고 앱 이름(예: `research-notifier`)과 대상 워크스페이스를 지정한다.
+2. 브라우저에서 https://api.slack.com/apps 에 접속한 뒤 **Create New App** -> **From scratch**를 선택한다(화면에 따라 그 아래 **Pick features**와 **Manifest**가 나오면 Pick features). 앱 이름(예: `research-notifier`)과 대상 워크스페이스를 지정한다.
 3. 좌측 메뉴의 **Incoming Webhooks**로 이동해 우측 상단 스위치를 **On**으로 켠다.
 4. 하단 **Add New Webhook to Workspace** 버튼을 누르고 `#research-alert` 채널을 선택해 허용한다.
 5. 생성된 `https://hooks.slack.com/services/...` 주소를 복사한다. 이 주소는 채팅이나 저장소에 붙여 넣지 않는다.
@@ -544,7 +545,7 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 
 `~/.bashrc`의 환경변수 대신 권한 600 파일에 저장한다. Ubuntu 기본 `~/.bashrc`는 비대화형 셸에서 앞부분에서 끝나 `nohup` 같은 실행에서는 변수가 보이지 않고, 이미 떠 있던 `tmux` 서버는 옛 환경변수를 그대로 쓰기 때문이다. `notify.py`는 이 파일을 먼저 읽고, 없으면 환경변수 `SLACK_WEBHOOK_URL`을 읽는다.
 
-서버 터미널에서 주소를 화면에 표시하지 않고 저장한다:
+서버 터미널에서 주소를 화면에 표시하지 않고 저장한다. 두 번째 줄은 한 줄 전체를 그대로 붙여 넣는다(끝이 잘려 `chmod: missing operand`가 나오면 주소는 저장된 것이니 `chmod 600 ~/.config/autoresearch/slack_webhook; unset U`만 다시 실행한다):
 
 ```bash
 mkdir -p ~/.config/autoresearch && chmod 700 ~/.config/autoresearch
@@ -557,28 +558,19 @@ read -rs -p "webhook URL: " U && printf '%s' "$U" > ~/.config/autoresearch/slack
 curl -X POST -H 'Content-type: application/json' --data '{"text":"원격 서버 Slack 연동 테스트 완료"}' "$(cat ~/.config/autoresearch/slack_webhook)"
 ```
 
-### A.3 `~/autoresearch/notify.py`
+### A.3 알림 규칙 (`notify.py`)
 
-파이썬 표준 라이브러리만 쓰고, 주소가 없거나 네트워크가 끊겨도 연구 실행이 멈추지 않도록 예외를 삼킨다.
+알림은 사람이 무엇을 해야 하거나 실행이 스스로 멈춘 때만, 사건 하나에 메시지 하나로 보낸다. 여러 메시지를 한꺼번에 보내지 않는다.
 
-```python
-import json
-import os
-import urllib.request
-from pathlib import Path
+| 알림 | 언제 |
+|---|---|
+| 파일럿 확인 요청 | 트랙 A/B의 파일럿이 끝나 채점 코드 확인을 기다릴 때 (한글 수정 지시 뒤 다시 보여 줄 때도 1개) |
+| 후보 부족 경고 | 트랙 B의 선별 후보 수가 `max_iterations`보다 많을 때 |
+| 트랙 C 이견 확인 요청 | 논리와 반례는 통과했지만 일반성·비자명성·밀착도 이견이 남았을 때 |
+| 완료 | 보고서가 나왔을 때. 보고서 경로와 결론 절만 보낸다 |
+| 제어기가 스스로 멈춤 | 파일럿 신호 없음, 트랙 C 기각, 오류(traceback은 코드 블록) |
 
-WEBHOOK_FILE = Path.home() / ".config" / "autoresearch" / "slack_webhook"
-
-
-def send(message):
-    url = WEBHOOK_FILE.read_text().strip() if WEBHOOK_FILE.exists() else os.environ.get("SLACK_WEBHOOK_URL", "").strip()
-    if not url:
-        return False
-    data = json.dumps({"text": message[:35000]}).encode()
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return 200 <= r.status < 300
-    except Exception:
-        return False
-```
+- 사람이 tmux에서 직접 고른 멈춤(`q`, push 거절)과 push 단계의 결과(push 완료, 브랜치만 만듦, push 관문 걸림)는 사람이 화면 앞에 있으므로 화면에만 표시한다.
+- 문제가 없는 실행이면 트랙 A/B는 2개(파일럿 확인, 완료), 트랙 C는 1개(완료)가 온다.
+- Slack은 일반 마크다운이 아닌 자체 형식(mrkdwn)을 쓴다. 보낼 때 `**굵게**`를 `*굵게*`로, 제목을 굵은 줄로, 링크를 `<주소|글>`로 바꾸고, 표는 한글을 두 칸 폭으로 계산해 칸을 맞춘 코드 블록에 넣는다(Slack에는 표가 없다). 코드 블록의 언어 표시(`python`)는 Slack에서 글자로 보이므로 지운다.
+- 주소가 없거나 네트워크가 끊겨도 실행은 멈추지 않는다(예외를 삼킨다). 모델 호출을 가짜로 바꾼 모의 실행은 Slack으로 보내지 않는다.
