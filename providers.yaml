@@ -1,0 +1,53 @@
+# 벤더를 어떻게 부르는지만 둔다: 모델 ID, CLI 플래그, 승격 순서, 대체 모델, 한도 초과 문구.
+# 무엇을 얼마나 부를지(단계별 배정, 호출 상한)는 실행 명세 00_spec.md에만 있다. 모델 버전 문자열은 aliases에서만 바꾼다.
+# cmd 자리표시자: {model} {effort} {out}. full_flags는 코드 수정 단계, readonly_flags는 조사·비평·감사 단계에 붙는다.
+# 2026-11-19 서버 실측: 아래 8개 ID 모두 "reply ok" 응답 확인. agy는 stdin을 읽지 않아 -p=<프롬프트> 인자로 넘긴다.
+
+vendors:
+  claude:
+    aliases: {sonnet: "sonnet", opus: "opus", fable: "fable"}
+    efforts: [low, medium, high, xhigh, max]
+    cmd: ["claude", "-p", "--model", "{model}", "--effort", "{effort}", "--output-format", "text"]
+    full_flags: ["--dangerously-skip-permissions"]
+    readonly_flags: ["--permission-mode", "dontAsk", "--allowedTools", "Read,Grep,Glob,WebSearch,WebFetch"]
+    prompt_via: stdin
+    escalation_ladder:
+      - {model: opus, effort: high}
+      - {model: opus, effort: xhigh}
+      - {model: opus, effort: max}
+    fallback_on_quota: {provider: agy, model: neon, effort: xhigh}
+
+  agy:
+    aliases: {neon: "gemini-4-neon"}            # 평소 medium, 핵심 단계 high·xhigh
+    efforts: [low, medium, high, xhigh]
+    cmd: ["agy", "--model", "{model}-{effort}"]  # ID에 추론 단계가 붙은 형식 (gemini-4-neon-high)
+    full_flags: ["--dangerously-skip-permissions"]
+    readonly_flags: ["--sandbox"]
+    prompt_via: arg
+    prompt_arg: "-p={prompt}"
+    escalation_ladder:
+      - {model: neon, effort: medium}
+      - {model: neon, effort: high}
+      - {model: neon, effort: xhigh}
+    fallback_on_quota: {provider: claude, model: opus, effort: xhigh}
+
+  codex:
+    aliases: {sol: "gpt-6.2-sol", astra: "gpt-6.2-astra"}
+    efforts: [minimal, low, medium, high, xhigh, max]
+    cmd: ["codex", "exec", "--skip-git-repo-check", "-m", "{model}", "-c", "model_reasoning_effort={effort}", "-o", "{out}"]
+    full_flags: ["--dangerously-bypass-approvals-and-sandbox"]
+    readonly_flags: ["-s", "read-only"]
+    prompt_via: stdin
+    tail: ["-"]                                   # "-" = stdin에서 지시문 읽기
+    output: file                                  # 마지막 메시지가 -o 파일로 나온다
+    escalation_ladder:
+      - {model: sol, effort: medium}
+      - {model: sol, effort: high}
+      - {model: astra, effort: high}
+    fallback_on_quota: {provider: agy, model: neon, effort: high}
+
+# 비정상 종료 출력에 이 문자열이 있으면 한도 초과로 보고 그 벤더를 이번 실행에서 뺀다.
+quota_patterns: ["rate limit", "rate_limit", "usage limit", "quota", "too many requests", "429", "limit reached"]
+
+push:
+  max_file_mb: 50
