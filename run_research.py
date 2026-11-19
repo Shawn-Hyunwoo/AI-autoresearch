@@ -859,8 +859,10 @@ def phase_track_ab(track):
         if track == "B" else []
     if len(cands) > BUDGET["max_iterations"] and not T.get("warned"):
         skipped = ", ".join(str(c.get("id", "?")) for c in cands[BUDGET["max_iterations"]:])
-        say(f"[{RUN_ID}] 경고: 선별 후보 {len(cands)}개에 시도 상한은 {BUDGET['max_iterations']}회입니다.\n"
-            f"유망도가 낮은 후보 {skipped}는 시도하지 못합니다.")
+        print(f"[{RUN_ID}] 선별 후보 {len(cands)}개에 시도 상한은 {BUDGET['max_iterations']}회라 "
+              f"유망도가 낮은 후보 {skipped}는 시도하지 못합니다.", flush=True)   # 할 일이 없는 알림이라 Slack으로는 보내지 않는다
+        with open(notes, "a") as f:
+            f.write(f"- 시도하지 못한 선별 후보 (시도 상한 {BUDGET['max_iterations']}회): {skipped}\n")
         T["warned"] = True
         save_state()
 
@@ -1010,7 +1012,7 @@ def phase_confirm_b():
 
 
 # ---- Phase 4 트랙 C: 증명 ↔ 반박·반례 탐색을 라운드로 반복
-HUNT_CATS = ("extreme", "singular", "equality", "typical")   # 양극단, 특이점, 등호 근처, 무던한 값
+HUNT_CATS = ("extreme", "singular", "equality", "typical")   # 양극단, 특이점, 등호 근처, 평범한 값
 
 
 def run_hunter(rd):
@@ -1066,7 +1068,7 @@ def phase_track_c():
     if not v["logic_sound"] or v["counterexamples_found"] != 0 or not v["tested_cases"]:
         raise Stop(f"트랙 C 기각: 논리 결함 또는 수치 반례\n{json.dumps(v, ensure_ascii=False)}")
     last = MAIN / f"C_round_{C['round']:02d}"
-    say(f"[{RUN_ID}] 트랙 C: 논리와 수치 반례 검사는 통과했지만 일반성·비자명성·밀착도·반례 탐색 범위 중 통과하지 못한 것이 있음.\n"
+    say(f"[{RUN_ID}] 트랙 C: 논리와 수치 반례 검사는 통과했지만 일반성·비자명성·경계의 tightness·반례 탐색 범위 중 통과하지 못한 것이 있음.\n"
         f"판정: {json.dumps(v, ensure_ascii=False)}\n\n증명 앞부분:\n{read(last / 'proof.md')[:1500]}\n\n"
         f"반박 요지:\n{read(last / 'refute.md')[-1500:]}")
     if ask("Enter: Phase 5 감사 진행 | q: 폐기하고 종료 > ").lower() == "q":

@@ -5,13 +5,13 @@
 track: "A"                        # A: 효용 실증 | B: 코드 최적화 | C: 정리 증명. 여러 개면 "A,C" (적은 순서대로 실행)
 source_repo: "<원본 프로젝트 절대경로>"
 base_branch: "main"               # 클론할 기준 브랜치. 원본의 이 브랜치는 건드리지 않는다
-base_env: "<conda env 이름 또는 python 절대경로>"   # 실행 전용 venv가 이 env의 패키지를 그대로 본다
+base_env: "<conda env 이름 또는 python 절대경로>"   # 실행 전용 venv에서 이 env의 패키지를 그대로 쓸 수 있다
 setup_cmds: []                    # venv 생성 뒤 클론 폴더에서 한 번 실행 (예: "pip install -e . --no-build-isolation")
 build_cmd: ""                     # 소스 수정 뒤 채점 전에 매번 실행 (C++/HIP 확장 재빌드 등). 없으면 빈 문자열
-copy_inputs: []                   # 원본에서 git-ignored 상태라 클론에 없는 입력 (예: "data/"). 복사한다
-references: []                    # (선택) 선행연구 조사가 먼저 읽을 자료: 원본 기준 경로(PDF, 폴더)나 URL, 논문 제목.
-                                  #   경로는 클론의 .ar_refs/로 복사되고 push되지 않는다
-push_remote: "origin"             # 보고서 확인 뒤 새 브랜치를 push할 원본의 원격. 공개 저장소면 push하지 않는다
+copy_inputs: []                   # 클론에 없는 입력(원본에서 git-ignored인 것, 예: "data/"). 클론으로 복사한다
+references: []                    # (선택) 선행연구 조사 단계에서 먼저 읽을 자료: 원본 기준 경로(PDF, 폴더)나 URL, 논문 제목.
+                                  #   경로로 적은 자료는 클론의 .ar_refs/로 복사하고 push하지 않는다
+push_remote: "origin"             # 원본 저장소의 원격. 보고서를 확인한 뒤 새 브랜치를 여기로 push한다. 공개 저장소면 push하지 않는다
 workspace:
   focus_hint: []                  # 먼저 볼 모듈
 constraints:
@@ -34,7 +34,7 @@ budget:                           # 쓰는 트랙의 항목만 있으면 된다.
   bench_rounds: 3                 # (트랙 B) 수정 전과 수정 후를 번갈아 잴 횟수. 중앙값으로 비교한다
   call_timeout_min: null          # 모델 호출 한 번의 시간 제한(분). null이면 제한 없음
 stages:                           # 단계별 모델 배정. 쓰는 트랙의 단계는 모두 있어야 한다
-                                  # 아래 '다른 벤더' 규칙은 이 표가 한 벤더만 쓰면 '다른 모델'로 낮춰 적용된다
+                                  # 이 표에 벤더가 하나뿐이면 아래 '다른 벤더' 규칙을 '다른 모델'로 낮춰 적용한다
   phase1_recon:
     slots:                        # role마다 prompts/phase1_<role>.md
       - {provider: claude, model: opus, effort: high, role: repo_scan}
