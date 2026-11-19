@@ -1,11 +1,13 @@
 # 세 CLI(claude, agy, codex)를 비대화형으로 부르는 라우터.
 # 안전 수칙을 프롬프트 앞뒤에 붙이고, 실행당 호출 상한·한도 초과 대체·승격 사다리를 처리한다.
+import json
 import os
 import re
 import signal
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
@@ -25,9 +27,12 @@ def setup(providers, limits, state, save, ctx, log_dir, timeout_s=None):
 def _run(argv, stdin, cwd, env):
     # 새 프로세스 그룹으로 띄워, 시간 제한에 걸리면 CLI가 띄운 셸과 실험 프로세스까지 함께 끝낸다.
     # stdin이 없으면 DEVNULL: tmux 터미널 입력을 CLI가 가져가지 않게 한다.
-    p = subprocess.Popen(argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd, env=env,
-                         start_new_session=True)
+    try:
+        p = subprocess.Popen(argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd, env=env,
+                             start_new_session=True)
+    except FileNotFoundError:   # CLI 자동 업데이트 중에는 실행 파일이 잠깐 없다. 실패로 보고 다시 시도하게 한다
+        return 127, "", f"[실행 파일 없음: {argv[0]}]"
     try:
         out, err = p.communicate(stdin, timeout=TIMEOUT)
         return p.returncode, out, err
@@ -75,8 +80,11 @@ def escalate(slot):
     return {**slot, "effort": v["efforts"][min(i + 1, len(v["efforts"]) - 1)]}
 
 
-def call(slot, body, out_file, *, mode, cwd, env, human=False):
+def call(slot, body, out_file, *, mode, cwd, env, human=False, session=None):
     # mode: "full"(권한 전체 허용) | "readonly". 결과 텍스트를 out_file에 쓰고 돌려준다.
+    # session: 여러 번 주고받는 호출이면 호출자가 state에 보관하는 dict. {"history": 대화 기록 파일 경로}로 시작하고
+    # 여기서 provider, model, id를 채운다. 같은 모델이면 그 세션을 이어 쓰고, 모델이 바뀌었거나 이어 쓰기가 실패했거나
+    # 벤더에 세션 기능이 없으면 새 세션을 열고 대화 기록을 앞에 붙인다.
     out_file = Path(out_file)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     safety = fill((PROMPTS / "_safety.md").read_text(), CTX)
@@ -89,22 +97,36 @@ def call(slot, body, out_file, *, mode, cwd, env, human=False):
         v = P["vendors"][slot["provider"]]
         if slot["effort"] not in v["efforts"]:
             raise RuntimeError(f"{slot['provider']}에 없는 추론 단계: {slot['effort']}")
+        s = v.get("session") if session is not None else None
+        resume = bool(s and session.get("id") and session.get("provider") == slot["provider"]
+                      and session.get("model") == slot["model"])
+        msg = prompt
+        if session is not None and not resume and Path(session["history"]).exists():
+            msg = (f"아래는 이 작업의 앞선 대화 기록이다. 이어서 맨 아래 '이번 지시'에 답한다.\n\n"
+                   f"{Path(session['history']).read_text()}\n\n## 이번 지시\n\n{prompt}")
+        sid = session["id"] if resume else str(uuid.uuid4())   # 새 세션 번호는 claude만 미리 정해 넘긴다
+        cmd = s["resume_cmd"] if resume and s.get("resume_cmd") else v["cmd"]
         argv = [a.replace("{model}", v["aliases"][slot["model"]]).replace("{effort}", slot["effort"])
-                .replace("{out}", str(out_file)) for a in v["cmd"]]
-        argv += v["full_flags"] if mode == "full" else v["readonly_flags"]
+                .replace("{out}", str(out_file)) for a in cmd]
+        if mode == "full":
+            argv += v["full_flags"]
+        else:
+            argv += s["resume_readonly_flags"] if resume and s.get("resume_readonly_flags") else v["readonly_flags"]
+        if s:
+            argv += [a.replace("{session}", sid) for a in s["resume" if resume else "new"]]
         stdin = None
         if v["prompt_via"] == "stdin":
             argv += v.get("tail", [])
-            stdin = prompt
+            stdin = msg
         else:
-            p = prompt
+            p = msg
             if len(p.encode()) > 100_000:  # ponytail: 리눅스 인자 하나의 상한(128KB) 때문에 파일로 우회
                 pf = out_file.with_suffix(".prompt.md")
-                pf.write_text(prompt)
+                pf.write_text(msg)
                 p = f"다음 파일의 지시를 끝까지 읽고 그대로 수행하라: {pf}"
             argv.append(v["prompt_arg"].replace("{prompt}", p))
         tag = f"{out_file.parent.name}_{out_file.stem}.{slot['provider']}-{slot['model']}-{slot['effort']}"
-        (LOG_DIR / f"{tag}.prompt.md").write_text(prompt)
+        (LOG_DIR / f"{tag}.prompt.md").write_text(msg)
         if v.get("output") == "file":
             out_file.unlink(missing_ok=True)
         t0 = time.perf_counter()
@@ -113,11 +135,30 @@ def call(slot, body, out_file, *, mode, cwd, env, human=False):
         (LOG_DIR / f"{tag}.log").write_text(f"argv: {' '.join(shown)}\nrc={rc} {time.perf_counter() - t0:.1f}s\n"
                                             f"--- stdout\n{out}\n--- stderr\n{err}")
         text = out_file.read_text() if v.get("output") == "file" and out_file.exists() else out
-        if rc == 0 and text.strip():
+        new_id = sid
+        if s and s["id"] == "jsonl":            # codex --json: 첫 이벤트 줄의 thread_id
+            new_id = next((json.loads(ln).get("thread_id") for ln in out.splitlines()
+                           if ln.startswith("{") and "thread_id" in ln), None)
+        elif s and s["id"] == "json":           # agy --output-format json: {"conversation_id", "response", "status"}
+            try:
+                j = json.loads(out)
+                new_id, text = j.get("conversation_id"), j.get("response", "") if j.get("status") == "SUCCESS" else ""
+            except json.JSONDecodeError:
+                new_id, text = None, ""
+        if rc == 0 and text.strip() and (not s or new_id):
             if v.get("output") != "file":
                 out_file.write_text(text)
+            if session is not None:
+                with _lock:
+                    session.update(provider=slot["provider"], model=slot["model"], id=new_id if s else None)
+                    with open(session["history"], "a") as f:
+                        f.write(f"## 지시\n\n{body}\n\n## 너의 답\n\n{text}\n\n")
+                    SAVE()
             return text
+        if session is not None:
+            session["id"] = None                # 이어 쓰기가 실패했으면 다음 시도는 새 세션 + 대화 기록
         tail = (out[-3000:] + err[-3000:]).lower()
+        time.sleep(15)                              # 일시적 문제(CLI 업데이트, 네트워크)가 지나가게 잠깐 기다린다
         with _lock:
             if any(q in tail for q in P["quota_patterns"]):
                 STATE.setdefault("exhausted", []).append(slot["provider"])

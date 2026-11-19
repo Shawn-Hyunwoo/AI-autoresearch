@@ -2,6 +2,9 @@
 # 무엇을 얼마나 부를지(단계별 배정, 호출 상한)는 실행 명세 00_spec.md에만 있다. 모델 버전 문자열은 aliases에서만 바꾼다.
 # cmd 자리표시자: {model} {effort} {out}. full_flags는 코드 수정 단계, readonly_flags는 조사·비평·감사 단계에 붙는다.
 # 2026-11-19 서버 실측: 아래 8개 ID 모두 "reply ok" 응답 확인. agy는 stdin을 읽지 않아 -p=<프롬프트> 인자로 넘긴다.
+# session: 여러 번 주고받는 단계(아이디어 토론)에서 앞 대화를 이어 쓰는 방법. new는 첫 호출, resume은 다음 호출에 붙고
+# {session}이 세션 번호로 바뀐다. id는 세션 번호를 얻는 곳: uuid(제어기가 정해 넘김), jsonl(codex 이벤트의 thread_id),
+# json(agy 출력의 conversation_id). 2026-11-19 세 CLI 모두 두 번째 호출이 첫 호출 내용을 기억하는 것을 확인했다.
 
 vendors:
   claude:
@@ -11,6 +14,7 @@ vendors:
     full_flags: ["--dangerously-skip-permissions"]
     readonly_flags: ["--permission-mode", "dontAsk", "--allowedTools", "Read,Grep,Glob,WebSearch,WebFetch"]
     prompt_via: stdin
+    session: {id: uuid, new: ["--session-id", "{session}"], resume: ["--resume", "{session}"]}
     escalation_ladder:
       - {model: opus, effort: high}
       - {model: opus, effort: xhigh}
@@ -25,6 +29,7 @@ vendors:
     readonly_flags: ["--sandbox"]
     prompt_via: arg
     prompt_arg: "-p={prompt}"
+    session: {id: json, new: ["--output-format", "json"], resume: ["--output-format", "json", "--conversation", "{session}"]}
     escalation_ladder:
       - {model: neon, effort: medium}
       - {model: neon, effort: high}
@@ -40,6 +45,12 @@ vendors:
     prompt_via: stdin
     tail: ["-"]                                   # "-" = stdin에서 지시문 읽기
     output: file                                  # 마지막 메시지가 -o 파일로 나온다
+    session:
+      id: jsonl
+      new: ["--json"]
+      resume: ["--json", "{session}"]
+      resume_cmd: ["codex", "exec", "resume", "--skip-git-repo-check", "-m", "{model}", "-c", "model_reasoning_effort={effort}", "-o", "{out}"]
+      resume_readonly_flags: ["-c", "sandbox_mode=read-only"]   # resume은 -s를 받지 않는다
     escalation_ladder:
       - {model: sol, effort: medium}
       - {model: sol, effort: high}
