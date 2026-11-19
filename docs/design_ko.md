@@ -269,7 +269,7 @@ falsification:
 1. 평가 하네스 (`research_runs/<run_id>/evaluation/`, builder 에이전트가 작성):
    - `prepare.py`: 고정 입력, 분할, 테스트 인스턴스를 `evaluation/inputs/main/`에 만들고, 기준 정답(레이블, 기대 출력 등 채점에만 쓰는 값)은 환경변수 `AR_HIDDEN_DIR`이 가리키는 폴더의 `main/`에만 쓴다. 트랙 A는 구간 탐색에 쓸 입력 변형(표본 수, 노이즈 수준, 문제 크기 등)을 이때 미리 정해 regime마다 `inputs/<regime>/`과 정답 `<regime>/`을 만든다. 본 실험에서 채점되는 regime은 여기서 만든 것뿐이다. 기존 저장소에 검증된 로더가 있으면 감싸 쓴다.
    - 정답 숨김: 실제 정답 폴더는 실행 폴더의 `hidden/`(클론 밖)이고, 제어기가 `prepare.py`, `test_gate.py`, `metrics.py`를 돌릴 때만 그 경로를 `AR_HIDDEN_DIR`로 넘긴다. 에이전트의 환경에는 이 변수가 없다. builder 에이전트에게는 자기 점검용 임시 폴더를 주고 호출이 끝나면 지운다. 잠긴 파일 목록을 에이전트에게 보여 줄 때도 정답 파일 이름은 빼고, 해시는 클론 밖의 `state.json`에만 둔다.
-   - `metrics.py`: **50줄 이내 순수 채점 함수**. `python metrics.py <result_dir> [regime]`로 실행되어(regime을 생략하면 main) 결과 파일과 기준만 읽고 `guard` 통과 여부와 `metric`을 계산해 stdout 마지막 줄에 JSON을 낸다(4.2절). 모델 초기화, 학습, 알고리즘 실행은 하지 않고, 각 지표의 수식 정의와 입출력 의미만 간결한 주석으로 단다.
+   - `metrics.py`: **50줄 이내 순수 채점 함수**. `python metrics.py <result_dir> [regime]`로 실행되어(regime을 생략하면 main) 결과 파일과 기준만 읽고 `guard` 통과 여부와 `metric`을 계산해 stdout 마지막 줄에 JSON을 낸다(4.2절). 모델 초기화, 학습, 알고리즘 실행은 하지 않는다. 평가 파일(`prepare.py`, `metrics.py`, `test_gate.py`, `run_bench.sh`)에는 코드 블록마다 무엇을 하는지 한 줄 주석을 달아, 파일럿 관문에서 주석만 읽어도 무엇을 채점하는지 알 수 있게 한다. 50줄에는 주석과 빈 줄을 세지 않는다.
    - `test_gate.py`: 소규모 정답 통과, 의도적 불량 입력 기각, SoTA 기준선 재현의 3단계를 검사하고 종료 코드로 알린다.
    - 트랙 B는 `run_bench.sh <result_dir>`도 만든다. 작은 규모의 정확도(Guard) 세트와 중대규모의 속도·메모리(Metric) 세트를 차례로 돌리는 고정 측정기다. 이 파일도 잠기므로 이후에는 소스 코드만 바뀐다. 워밍업은 측정 입력과 다른 입력으로 하고 측정 입력으로는 한 번만 부른다. 같은 프로세스에서 같은 입력을 두 번 불러 두 번째 시간을 재면, 입력별 결과를 저장해 두는 캐시가 가짜 속도 향상으로 측정되기 때문이다(2026-11-19 장난감 실행에서 builder가 이렇게 짰다).
    - 트랙 A는 선별 후보와 SoTA 기준선마다 `02_pilot/<id>/run.sh <result_dir>`를 만든다.
