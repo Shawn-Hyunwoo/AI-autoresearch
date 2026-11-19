@@ -65,6 +65,32 @@ if not STAGES["phase2_ideation"].get("critics"):
     raise SystemExit("stages.phase2_ideation.critics가 비어 있습니다 (diverger마다 critic 한 명과 토론합니다)")
 
 
+# 쓸 수 있는 벤더: providers.yaml에 있고 CLI가 설치된 것. 하나뿐이면 분리 규칙을 벤더 대신 모델 단위로 지킨다
+AVAIL = [k for k, v in PROV["vendors"].items() if shutil.which(v["cmd"][0])]
+if not AVAIL:
+    raise SystemExit(f"{PROV_PATH.name}의 벤더 CLI가 하나도 설치되어 있지 않습니다 "
+                     f"({', '.join(v['cmd'][0] for v in PROV['vendors'].values())})")
+SOLO = len(AVAIL) == 1
+UNIT = "모델" if SOLO else "벤더"
+ADAPT = [f"쓸 수 있는 벤더가 {AVAIL[0]} 하나라 교차 검토를 다른 벤더 대신 다른 모델로 했다 (독립성이 약하다)"] if SOLO else []
+
+
+def kin(s):
+    # 분리 규칙의 단위: 벤더. 쓸 수 있는 벤더가 하나뿐이면 모델
+    return (s["provider"], s["model"]) if SOLO else s["provider"]
+
+
+for k in AVAIL:   # 한도 초과 때 넘어갈 곳이 설치되지 않은 벤더면, 다른 설치된 벤더(없으면 자기)의 사다리 맨 위로 바꾼다
+    v, fb = PROV["vendors"][k], PROV["vendors"][k].get("fallback_on_quota") or {}
+    if fb.get("provider") not in AVAIL:
+        alt = next((o for o in AVAIL if o != k), k)
+        a = PROV["vendors"][alt]
+        v["fallback_on_quota"] = {"provider": alt, **(a.get("escalation_ladder")
+                                                     or [{"model": next(iter(a["aliases"])), "effort": a["efforts"][-1]}])[-1]}
+        ADAPT.append(f"{k}의 한도 초과 대체를 {fb.get('provider')}(설치 안 됨)에서 "
+                     f"{alt}/{v['fallback_on_quota']['model']}/{v['fallback_on_quota']['effort']}로 바꿨다")
+
+
 def slots_in(x, path="stages"):
     # 명세 stages 안의 모든 모델 슬롯 (after_quota 포함)
     if isinstance(x, dict):
@@ -82,11 +108,16 @@ for where, s in slots_in(STAGES):
     v = PROV["vendors"].get(s["provider"])
     if not v:
         BAD.append(f"{where}: 없는 벤더 '{s['provider']}' (있는 것: {', '.join(PROV['vendors'])})")
+    elif s["provider"] not in AVAIL:
+        BAD.append(f"{where}: '{s['provider']}' CLI({v['cmd'][0]})가 설치되어 있지 않음 (쓸 수 있는 것: {', '.join(AVAIL)})")
     elif s.get("model") not in v["aliases"]:
         BAD.append(f"{where}: {s['provider']}에 없는 모델 '{s.get('model')}' (있는 것: {', '.join(v['aliases'])})")
     elif s.get("effort") not in v["efforts"]:
         BAD.append(f"{where}: {s['provider']}에 없는 추론 단계 '{s.get('effort')}' (있는 것: {', '.join(v['efforts'])})")
-for k, v in PROV["vendors"].items():   # 선행연구 교차 조사의 기본 조사자 (providers.yaml의 search)
+for k, v in ((k, PROV["vendors"][k]) for k in AVAIL):   # 교차 조사의 기본 조사자(search)와 한도 초과 대체
+    fb = v["fallback_on_quota"]
+    if fb["model"] not in PROV["vendors"][fb["provider"]]["aliases"] or fb["effort"] not in PROV["vendors"][fb["provider"]]["efforts"]:
+        BAD.append(f"{PROV_PATH.name} vendors.{k}.fallback_on_quota: 없는 모델이나 추론 단계 {fb}")
     if v.get("search") and (v["search"].get("model") not in v["aliases"] or v["search"].get("effort") not in v["efforts"]):
         BAD.append(f"{PROV_PATH.name} vendors.{k}.search: 없는 모델이나 추론 단계 {v['search']}")
 if {"A", "C"} & set(TRACKS) and not any(s.get("role") == "lit_search" for s in STAGES["phase1_recon"]["slots"]):
@@ -94,19 +125,19 @@ if {"A", "C"} & set(TRACKS) and not any(s.get("role") == "lit_search" for s in S
 if BAD:
     raise SystemExit(f"명세의 모델 배정에 {PROV_PATH.name}에 없는 값이 있습니다:\n" + "\n".join(BAD))
 AUDIT = STAGES["phase5_audit"]
-if AUDIT.get("checker") and AUDIT["checker"]["provider"] == AUDIT["reporter"]["provider"]:
-    raise SystemExit("phase5_audit의 checker(보고서 검토)는 reporter와 다른 벤더여야 합니다")
+if AUDIT.get("checker") and kin(AUDIT["checker"]) == kin(AUDIT["reporter"]):
+    raise SystemExit(f"phase5_audit의 checker(보고서 검토)와 reporter는 서로 다른 {UNIT}로 둬야 합니다")
 LIMITS = BUDGET["run_limits"]
 CONTRACT = CFG.get("evaluation_contract") or {}
 DIRECTION = CONTRACT.get("direction", "higher_is_better")
 
 # 작성 모델과 반박·감사 모델은 계열(벤더)이 달라야 한다. 한도 초과로 대체된 뒤까지는 보장하지 않는다.
-MAIN_PROVIDERS = {STAGES[f"phase4_track_{t.lower()}"][r]["provider"]
-                  for t, r in (("A", "experimenter"), ("B", "worker"), ("C", "prover")) if t in TRACKS}
-if "C" in TRACKS and STAGES["phase4_track_c"]["prover"]["provider"] == STAGES["phase4_track_c"]["refuter"]["provider"]:
-    raise SystemExit("트랙 C의 prover와 refuter는 다른 벤더여야 합니다")
-if MAIN_PROVIDERS & {a["provider"] for a in STAGES["phase5_audit"]["auditors"]}:
-    raise SystemExit(f"Phase 5 감사자에 본 실험 벤더({', '.join(MAIN_PROVIDERS)})가 들어 있습니다")
+MAIN_KINS = {kin(STAGES[f"phase4_track_{t.lower()}"][r])
+             for t, r in (("A", "experimenter"), ("B", "worker"), ("C", "prover")) if t in TRACKS}
+if "C" in TRACKS and kin(STAGES["phase4_track_c"]["prover"]) == kin(STAGES["phase4_track_c"]["refuter"]):
+    raise SystemExit(f"트랙 C의 prover와 refuter는 서로 다른 {UNIT}로 둬야 합니다")
+if MAIN_KINS & {kin(a) for a in STAGES["phase5_audit"]["auditors"]}:
+    raise SystemExit(f"Phase 5 감사자는 본 실험과 다른 {UNIT}로 둬야 합니다 (본 실험: {', '.join('/'.join(k) if SOLO else k for k in MAIN_KINS)})")
 SPLIT_LOCK = (CFG.get("constraints") or {}).get("split_lock") or []
 SPLIT_LOCK = [SPLIT_LOCK] if isinstance(SPLIT_LOCK, str) else SPLIT_LOCK
 SECOND_PASS = (CFG.get("constraints") or {}).get("timing_rule") == "second_pass"
@@ -150,6 +181,8 @@ def visible_locks():
 
 
 TIMEOUT = BUDGET.get("call_timeout_min")
+for a in ADAPT:
+    print(f"[조정] {a}", flush=True)
 llm.setup(PROV, LIMITS, STATE, save_state, {
     "out_dir": OUT, "eval_dir": EVAL, "branch": BRANCH, "venv": VENV,
     "locked": ", ".join(visible_locks()) or "아직 없음"}, RUN / "llm_logs", TIMEOUT * 60 if TIMEOUT else None)
@@ -527,7 +560,8 @@ def phase_workspace():
         for c in CFG.get("setup_cmds") or []:
             sh(c)
     v = sh([PY, "-m", "pip", "list", "--format=freeze"], check=False).stdout
-    (OUT / "env.txt").write_text(f"{sh([PY, '--version']).stdout}base_commit {STATE['base_commit']}\n\n{v}")
+    (OUT / "env.txt").write_text("".join(f"조정: {a}\n" for a in ADAPT)
+                                 + f"{sh([PY, '--version']).stdout}base_commit {STATE['base_commit']}\n\n{v}")
 
 
 # ---- Phase 1: 저장소 내부 자산 + 선행연구(SoTA 기준선, 알려진 결과, 이미 알려진 접근).
@@ -597,7 +631,7 @@ def phase_recon():
     deep = bool({"A", "C"} & set(TRACKS))
     plain = [s for s in st["slots"] if not (deep and s["role"] == "lit_search")]
     finders = (st.get("searchers") or [{"provider": k, **v["search"]} for k, v in PROV["vendors"].items()
-                                       if v.get("search")]) if deep else []
+                                       if v.get("search") and k in AVAIL]) if deep else []
     texts = parallel([(s, prompt(f"phase1_{s['role']}.md", spec=SPEC_TEXT, references=refs),
                        OUT / "01_recon" / f"recon_{i:02d}.md", "readonly", True) for i, s in enumerate(plain, 1)]
                      + [(s, prompt("phase1_search.md", n=i, track=",".join(TRACKS), spec=SPEC_TEXT, references=refs),
@@ -620,10 +654,10 @@ def phase_recon():
 # ---- Phase 2: 아이디어 토론 → 선별. diverger마다 critic 한 명과 1:1로 최대 max_ideation_rounds회 주고받고,
 # 보완 요청이 남지 않으면 그 토론은 끝난다. 통과 후보가 없으면 탈락 사유를 알리고 멈춘다
 def pair_critics(divs, crits):
-    # diverger마다 critic 한 명. 다른 벤더 critic을 우선하고, 그중 덜 배정된 critic을 고른다
+    # diverger마다 critic 한 명. 다른 벤더(벤더가 하나뿐이면 다른 모델) critic을 우선하고, 그중 덜 배정된 critic을 고른다
     used, out = [0] * len(crits), []
     for dv in divs:
-        js = [j for j, c in enumerate(crits) if c["provider"] != dv["provider"]] or list(range(len(crits)))
+        js = [j for j, c in enumerate(crits) if kin(c) != kin(dv)] or list(range(len(crits)))
         j = min(js, key=lambda j: (used[j], j))
         used[j] += 1
         out.append(j)
@@ -1179,6 +1213,7 @@ def phase_final():
         + (f"{x['verdict']}. {x['note']}\n" if x.get("verdict") else "판단 없음, 보고서 4절 확인\n") for x in items)
         + "\n" if items else "") \
         + "".join(f"{who}: 치명 지적 목록을 형식대로 받지 못함. 05_audit.md 확인\n\n" for who in fatal.get("unformatted") or [])
+    warn += "".join(f"참고: {a}\n" for a in ADAPT) + ("\n" if ADAPT else "")
     say(f"[{RUN_ID}] 완료\n{warn}보고서: {OUT / '06_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}")
     if ask(f"보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
         raise Stop("push 보류. 나중에 --resume으로 다시 묻습니다", by_user=True)

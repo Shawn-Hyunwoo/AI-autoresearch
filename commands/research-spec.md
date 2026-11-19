@@ -9,7 +9,8 @@ argument-hint: <연구 질문>
 
 먼저 읽을 것:
 - `~/autoresearch/templates/00_spec_template.md` (명세서 형식과 기본 모델 배정·호출 상한)
-- `~/autoresearch/providers.yaml` (쓸 수 있는 벤더, 모델 별명, 추론 단계. 명세에 옮겨 적지 않는다)
+- `~/autoresearch/providers.yaml` (벤더, 모델 별명, 추론 단계. 명세에 옮겨 적지 않는다)
+- 쓸 수 있는 벤더: providers.yaml의 벤더마다 `cmd`의 첫 단어(claude, agy, codex)를 `command -v`로 확인한다. 설치되지 않은 벤더는 쓰지 않는다
 - 기본값: `<프로젝트>/.autoresearch/defaults.yaml`이 있으면 그 값으로 템플릿을 채운다. 없으면 `~/autoresearch_runs/<프로젝트명>/*/00_spec.md` 중 가장 최근 것의 값을 쓴다. 둘 다 없으면 템플릿 값 그대로다.
 - `~/autoresearch/prompts/_writing_rules.md` (질문과 설명에 적용할 서술 규칙)
 - 지금 폴더가 git 저장소면 그 저장소의 CLAUDE.md 또는 AGENTS.md
@@ -29,14 +30,14 @@ argument-hint: <연구 질문>
    - push_remote: 원본 저장소의 원격 이름.
    - references: 사용자가 말한 참고 자료(논문, PDF 폴더, URL)를 적는다. 저장소에 git-ignored 참고 문헌 폴더가 보이면 (추측)으로 넣는다. 없으면 비우고 따로 묻지 않는다.
    - evaluation_contract: 질문에서 guard(깨지면 안 되는 조건)와 metric(지표와 방향)을 정한다. 트랙 B면 min_improvement_pct도 정한다.
-   - budget: 기본값을 쓴다. 쓰는 트랙에 필요한 항목만 적는다. 공통은 max_crash_repairs, run_limits, max_ideation_rounds(Phase 2 아이디어 토론의 최대 회차, 기본 1). 트랙 A·B는 max_iterations, 트랙 A는 seeds, 트랙 B는 bench_rounds, 트랙 C는 max_debate_rounds. call_timeout_min은 선택이다.
-   - stages: 기본값을 쓴다. 쓰는 트랙의 단계를 빠짐없이 적는다. 모델과 추론 단계는 providers.yaml에 있는 것만 쓴다.
+   - budget: 기본값을 쓴다. 쓰는 트랙에 필요한 항목만 적는다. run_limits에서 쓸 수 없는 벤더의 키는 뺀다. 쓸 수 있는 벤더가 하나뿐이면 그 벤더 전체에 거는 상한(예: codex: 3)은 두지 않는다(모든 호출이 그 벤더라 상한에 닿으면 실행이 멈춘다). 공통은 max_crash_repairs, run_limits, max_ideation_rounds(Phase 2 아이디어 토론의 최대 회차, 기본 1). 트랙 A·B는 max_iterations, 트랙 A는 seeds, 트랙 B는 bench_rounds, 트랙 C는 max_debate_rounds. call_timeout_min은 선택이다.
+   - stages: 기본값을 쓴다. 쓰는 트랙의 단계를 빠짐없이 적는다. 모델과 추론 단계는 providers.yaml에 있는 것만 쓴다. 쓸 수 없는 벤더의 슬롯(after_quota 포함)은 쓸 수 있는 벤더의 비슷한 체급 모델로 바꾼다. 분리 규칙(트랙 C의 prover와 refuter, Phase 5 감사자와 Phase 4 주력, checker와 reporter)은 쓸 수 있는 벤더가 둘 이상이면 다른 벤더로, 하나뿐이면 다른 모델로 지킨다.
 3. 사용자가 준 값을 연구 주제와 견주어 본다. 어긋나 보이는 값만 이유 한 줄과 함께 확인받는다. 이상한 점이 없으면 이 단계를 건너뛴다. 확인할 만한 예:
    - 모델 배정이 일의 무게와 맞지 않는다. 조사는 강한 모델인데 구현, 수리, 본 실험, 반박, 감사는 약한 모델이거나 낮은 추론 단계인 경우. critic이 짝지을 diverger보다 약한 경우(critic이 후보의 채택과 탈락을 정한다). 트랙 C의 증명이나 반박을 낮은 추론 단계로 두는 경우.
    - 트랙이 질문과 맞지 않는다.
    - 시도 횟수, 시드 수, 라운드 수, 호출 상한이 주제에 비해 너무 작거나 크다.
    - guard나 metric이 질문에 답하지 못하거나 계산할 수 없다.
-   - 제어기가 거부할 조합이다. 트랙 C의 prover와 refuter가 같은 벤더이거나, Phase 5 auditors에 Phase 4 주력 모델의 벤더가 들어 있거나, checker가 reporter와 같은 벤더인 경우.
+   - 제어기가 거부할 조합이다. 트랙 C의 prover와 refuter가 같은 벤더이거나, Phase 5 auditors에 Phase 4 주력 모델의 벤더가 들어 있거나, checker가 reporter와 같은 벤더인 경우. 쓸 수 있는 벤더가 하나뿐이면 벤더 대신 모델로 따진다.
 4. 명세 본문에 연구 질문, 가설, 허용 가정을 평문으로 적는다.
 5. 초안 블록을 보여 주고 "고칠 줄만 적어 주세요. 그대로면 ㅇㅇ"이라고 묻는다(첫째 문답). 블록은 아래 꼴로 짧게 쓰고, 추측한 값에는 (추측)을, 3번에서 어긋나 보인 값에는 이유 한 줄을 붙인다. 그 밖의 설명은 붙이지 않는다.
    ```
@@ -44,6 +45,7 @@ argument-hint: <연구 질문>
    guard: <조건>. metric: <지표>, higher_is_better.
    budget: max_iterations 15, max_crash_repairs 3, seeds 3, run_limits {fable: 5, codex: 3}, 아이디어 토론 1회(기본, 늘릴 수 있음).
    모델: <단계별 배정 한두 줄 요약>
+   벤더: <쓸 수 있는 벤더> (설치되지 않은 것: <…>. 모두 있으면 이 줄은 뺀다)
    ```
    사용자가 그대로 받으면 6번으로 간다. 고쳤으면 고친 결과를 10줄 이내로 요약해 "이대로 쓸까요?"를 묻는다(둘째 문답). 사용자가 모든 값을 줬고 어긋난 값도 없으면 첫째 문답 대신 이 요약만 보여 주고 묻는다.
 6. 확정되면 실행 폴더 `~/autoresearch_runs/<프로젝트명>/<YYYY-MM-DD>_<짧은_영문_주제>/`를 만들고 두 파일을 둔다. 프로젝트명은 source_repo 폴더 이름이다. 클론이나 venv는 만들지 않는다(제어기가 만든다).
