@@ -484,8 +484,15 @@ def phase_pilot():
     shutil.rmtree(SELFTEST, ignore_errors=True)         # 자기 점검용 정답은 남기지 않는다
     harness_check()
     rows, table = pilot_runs()
-    if not any(v.get("guard_pass") for v in rows.values()):
-        raise Stop(f"파일럿 신호 없음 (guard 통과 0건)\n{table}")
+    if "A" in TRACKS:   # 트랙 A는 선별 후보 중 하나 이상이 guard를 통과해야 한다. 기준선은 세지 않는다
+        base_ids = {b.get("id") for b in json.loads(read(OUT / "01b_ideation" / "01b_selected.json", "{}"))
+                    .get("sota_baselines") or []}
+        ok, why = any(v.get("guard_pass") for k, v in rows.items() if k not in base_ids), \
+            "선별 후보 중 guard를 통과한 것이 없음 (기준선은 세지 않음)"
+    else:
+        ok, why = any(v.get("guard_pass") for v in rows.values()), "guard 통과 0건"
+    if not ok:
+        raise Stop(f"파일럿 신호 없음: {why}\n{table}")
 
 
 def phase_gate_pilot():
