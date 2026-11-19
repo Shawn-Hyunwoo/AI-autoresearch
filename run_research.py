@@ -269,19 +269,20 @@ def run_once(script, res, seed=0):
     return rc, log, wall
 
 
-def score(res, wall):
-    # metrics.py는 제어기만 돌리고, 이때만 숨긴 정답 경로를 넘긴다.
+def score(res, wall, regime=None):
+    # metrics.py는 제어기만 돌리고, 이때만 숨긴 정답 경로를 넘긴다. regime은 prepare.py가 미리 만든 입력 변형의 이름
     # ponytail: 에이전트와 같은 리눅스 사용자라 정답 폴더를 일부러 찾아 읽는 것까지는 막지 못한다 (막으려면 별도 사용자나 컨테이너)
     verify_locks()
-    r = sh([PY, str(EVAL / "metrics.py"), str(res)], check=False, env=SCORE_ENV)
+    r = sh([PY, str(EVAL / "metrics.py"), str(res)] + ([regime] if regime else []), check=False, env=SCORE_ENV)
     s = last_json(r.stdout) or {"guard_pass": False, "primary_metric": None,
                                  "guard_reason": f"metrics.py 출력 없음: {r.stderr[-300:]}"}
     s.setdefault("wall_time_sec", wall)
     return s
 
 
-def run_case(work, script, seed=0):
+def run_case(work, script, seed=0, by_case=False):
     # script를 실행해 work/result에 결과를 만들고 채점한다. 비정상 종료(crash)면 수리 후 다시 돈다.
+    # by_case=True(트랙 A 본 실험)면 result 아래 경우별 폴더(<모델 id> 또는 <모델 id>@<regime>)를 하나씩 채점한다.
     res = work / "result"
     for attempt in range(BUDGET["max_crash_repairs"] + 1):
         rc, log, wall = run_once(script, res, seed)
@@ -293,8 +294,14 @@ def run_case(work, script, seed=0):
             return {"status": "crash", "guard_pass": False, "primary_metric": None, "wall_time_sec": wall,
                     "guard_reason": log[-300:]}
         repair(work, f"AR_SEED={seed} bash {script} {res}", log, attempt + 1)
-    s = score(res, wall)
-    s["status"] = "ok"
+    if by_case:
+        cases = {c.name: score(c, wall, c.name.split("@", 1)[1] if "@" in c.name else None)
+                 for c in sorted(p for p in res.iterdir() if p.is_dir())}
+        s = {"status": "ok", "wall_time_sec": wall, "cases": cases or {"(경우 폴더 없음)": {
+            "guard_pass": False, "primary_metric": None, "guard_reason": "result 아래에 경우별 폴더가 없음"}}}
+    else:
+        s = score(res, wall)
+        s["status"] = "ok"
     (work / "score.json").write_text(json.dumps(s, ensure_ascii=False, indent=2))
     return s
 
@@ -304,22 +311,31 @@ def nums(rows, key="primary_metric"):
 
 
 def attempt_a(work):
-    # 트랙 A 시도 1회: run.sh를 시드(AR_SEED)마다 돌려 평균과 평균의 표준오차를 낸다. 모든 시드에서 guard를 통과해야 채택
+    # 트랙 A 시도 1회: run.sh를 시드(AR_SEED)마다 돌리고, 경우(모델 × regime)마다 제어기가 채점해
+    # 시드 평균과 평균의 표준오차를 낸다. 모든 경우가 모든 시드에서 guard를 통과해야 채택한다
     script = work / "run.sh"
     if not script.exists():
-        return {"status": "crash", "guard_pass": False, "primary_metric": None, "guard_reason": "run.sh 없음"}
-    runs = []
+        return {"status": "crash", "guard_pass": False, "cases": {}, "guard_reason": "run.sh 없음"}
+    per = {}
     for sd in range(BUDGET["seeds"]):
-        s = run_case(work / f"seed_{sd}", script, sd)
-        runs.append(s)
+        s = run_case(work / f"seed_{sd}", script, sd, by_case=True)
         if s["status"] == "crash":
-            return s
-    vals = nums(runs)
-    out = {"status": "ok", "guard_pass": all(r.get("guard_pass") for r in runs) and len(vals) == len(runs),
-           "primary_metric": statistics.mean(vals) if vals else None,
-           "spread": statistics.stdev(vals) / len(vals) ** 0.5 if len(vals) > 1 else None, "n_seeds": len(vals),
-           "wall_time_sec": statistics.mean(nums(runs, "wall_time_sec") or [0]),
-           "guard_reason": next((r.get("guard_reason", "") for r in runs if not r.get("guard_pass")), "")}
+            return {**s, "cases": {}}
+        for name, sc in s["cases"].items():
+            per.setdefault(name, []).append(sc)
+    cases = {}
+    for name, runs in per.items():
+        vals = nums(runs)
+        cases[name] = {"guard_pass": all(r.get("guard_pass") for r in runs) and len(vals) == BUDGET["seeds"],
+                       "primary_metric": statistics.mean(vals) if vals else None,
+                       "spread": statistics.stdev(vals) / len(vals) ** 0.5 if len(vals) > 1 else None,
+                       "n_seeds": len(vals), "wall_time_sec": statistics.mean(nums(runs, "wall_time_sec") or [0]),
+                       "guard_reason": next((r.get("guard_reason", "") for r in runs if not r.get("guard_pass")), "")}
+    (work / "comparison.md").write_text(        # 제어기가 채점한 경우별 비교표
+        f"| 경우 | {CONTRACT.get('metric', 'metric')} 평균 | 표준오차 | 시드 수 | guard |\n|---|---|---|---|---|\n" + "".join(
+            f"| {k} | {v['primary_metric']} | {v['spread']} | {v['n_seeds']} | {v['guard_pass']} |\n" for k, v in cases.items()))
+    out = {"status": "ok", "cases": cases, "guard_pass": all(v["guard_pass"] for v in cases.values()),
+           "guard_reason": next((f"{k}: {v['guard_reason']}" for k, v in cases.items() if not v["guard_pass"]), "")}
     (work / "score.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
     return out
 
@@ -546,11 +562,12 @@ def phase_track_ab(track):
             results=tail(tsv), notes=tail(notes, 60), advice=T["advice"], iter_dir=work, eval_dir=EVAL,
             best_commit=STATE["best_commit"], best_metric=T["best_metric"], direction=DIRECTION,
             min_pct=CONTRACT.get("min_improvement_pct", 1.0), build_cmd=CFG.get("build_cmd") or "없음",
-            seeds=BUDGET.get("seeds"), rounds=BUDGET.get("bench_rounds"), assigned=assigned),
+            seeds=BUDGET.get("seeds"), rounds=BUDGET.get("bench_rounds"), assigned=assigned,
+            regimes=", ".join(sorted(p.name for p in (EVAL / "inputs").glob("*") if p.is_dir())) or "main"),
             work / "agent.md", mode="full", cwd=REPO, env=ENV)
         if track == "A":
             s = attempt_a(work)
-            delta = pct(s.get("primary_metric"), T["best_metric"])
+            delta = None
             keep = bool(s.get("guard_pass"))
         else:
             s = attempt_b(work)
@@ -565,7 +582,7 @@ def phase_track_ab(track):
             else:                                       # 후보는 attempt_b에서 이미 커밋됨. 메시지만 바꾼다
                 git("commit", "--amend", "--allow-empty", "-q", "-m", f"B iter {it}: {summary[:60]}")
             STATE["best_commit"] = git("rev-parse", "HEAD")
-            if T["best_metric"] is None or (delta or 0) > 0:
+            if track == "B" and (T["best_metric"] is None or (delta or 0) > 0):   # 트랙 A는 경우별 표(comparison.md)로 본다
                 T["best_metric"] = s["primary_metric"]
             T["stale"] = 0
         else:
@@ -573,7 +590,11 @@ def phase_track_ab(track):
             git("clean", "-fd")
             T["stale"] += 1
         status = "keep" if keep else ("crash" if s["status"] == "crash" else "discard")
-        row(it, STATE["best_commit"][:9] if keep else "-", status, s, delta, summary)
+        if track == "A" and s.get("cases"):             # 트랙 A는 경우(모델 × regime)마다 한 줄
+            for i, (name, c) in enumerate(s["cases"].items()):
+                row(f"{it}:{name}", STATE["best_commit"][:9] if keep else "-", status, c, None, summary if i == 0 else "")
+        else:
+            row(it, STATE["best_commit"][:9] if keep else "-", status, s, delta, summary)
         with open(notes, "a") as f:
             f.write(f"- {track} iter {it} [{status}] {summary}\n")
         if T["stale"] >= 2:                              # 두 번 연속 실패나 정체: 한 칸 승격 + (B) 다른 계열 자문
