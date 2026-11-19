@@ -61,6 +61,34 @@ if MISSING:
     raise SystemExit(f"명세에 빠진 항목: {', '.join(MISSING)} (templates/00_spec_template.md 참고)")
 if not STAGES["phase2_ideation"].get("critics"):
     raise SystemExit("stages.phase2_ideation.critics가 비어 있습니다 (diverger마다 critic 한 명과 토론합니다)")
+
+
+def slots_in(x, path="stages"):
+    # 명세 stages 안의 모든 모델 슬롯 (after_quota 포함)
+    if isinstance(x, dict):
+        if "provider" in x:
+            yield path, x
+        for k, v in x.items():
+            yield from slots_in(v, f"{path}.{k}")
+    elif isinstance(x, list):
+        for i, v in enumerate(x):
+            yield from slots_in(v, f"{path}[{i}]")
+
+
+BAD = []   # 오타는 그 단계가 호출될 때가 아니라 시작할 때 잡는다
+for where, s in slots_in(STAGES):
+    v = PROV["vendors"].get(s["provider"])
+    if not v:
+        BAD.append(f"{where}: 없는 벤더 '{s['provider']}' (있는 것: {', '.join(PROV['vendors'])})")
+    elif s.get("model") not in v["aliases"]:
+        BAD.append(f"{where}: {s['provider']}에 없는 모델 '{s.get('model')}' (있는 것: {', '.join(v['aliases'])})")
+    elif s.get("effort") not in v["efforts"]:
+        BAD.append(f"{where}: {s['provider']}에 없는 추론 단계 '{s.get('effort')}' (있는 것: {', '.join(v['efforts'])})")
+if BAD:
+    raise SystemExit(f"명세의 모델 배정에 {PROV_PATH.name}에 없는 값이 있습니다:\n" + "\n".join(BAD))
+AUDIT = STAGES["phase5_audit"]
+if AUDIT.get("checker") and AUDIT["checker"]["provider"] == AUDIT["reporter"]["provider"]:
+    raise SystemExit("phase5_audit의 checker(보고서 검토)는 reporter와 다른 벤더여야 합니다")
 LIMITS = BUDGET["run_limits"]
 CONTRACT = CFG.get("evaluation_contract") or {}
 DIRECTION = CONTRACT.get("direction", "higher_is_better")
@@ -216,6 +244,17 @@ SELECT_SCHEMA = ('```json\n{"sota_baselines": [{"id": "BASE_1", "name": "...", "
 VERDICT_SCHEMA = '출력 마지막 줄에 JSON 한 줄: {"logic_sound": true, "scope_realistic": true, "non_trivial": true, "fatal_flaws": []}'
 CRITIC_SCHEMA = ('```json\n{"verdicts": [{"id": "D1_A", "verdict": "accept|revise|reject", "reason": "...", '
                  '"request": "revise일 때만"}]}\n```')
+
+
+FIX_SCHEMA = '```json\n{"fixes": [{"find": "보고서 원문 그대로", "replace": "고친 문장", "why": "근거 파일과 값"}]}\n```'
+
+
+def parse_fixes(text):
+    fx = block_json(text).get("fixes")
+    if not isinstance(fx, list) or any(not isinstance(f, dict) or not isinstance(f.get("find"), str)
+                                       or not isinstance(f.get("replace"), str) for f in fx):
+        raise ValueError("fixes 형식이 틀림")
+    return fx
 
 
 def parse_critique(final):
@@ -610,13 +649,28 @@ def phase_pilot():
         raise Stop(f"파일럿 신호 없음: {why}\n{table}")
 
 
+def explain_scoring():
+    # 채점 코드가 실제로 하는 일을 다른 모델이 읽고 자연어로 설명한다. 사람이 코드를 읽지 않고 관문에서 확인하도록.
+    # explainer가 명세에 없으면 metrics.py 원문을 보여 준다. 채점 코드가 바뀌었을 때만 다시 부른다
+    ex, out = STAGES["phase3_pilot"].get("explainer"), OUT / "03_pilot" / "scoring_explained.md"
+    if not ex:
+        return f"metrics.py\n```\n{read(EVAL / 'metrics.py')}\n```"
+    codes = sorted(p for p in EVAL.iterdir() if p.suffix in (".py", ".sh"))
+    if not out.exists() or any(p.stat().st_mtime > out.stat().st_mtime for p in codes):
+        agent("explainer", ex, prompt("phase3_explain.md", tracks=",".join(TRACKS),
+                                      contract=json.dumps(CONTRACT, ensure_ascii=False),
+                                      pilot_check=(CFG.get("falsification") or {}).get("pilot_check", "-"),
+                                      code="\n\n".join(f"### {p.name}\n```\n{read(p)}\n```" for p in codes)),
+              out, "readonly", human=True)
+    return (f"채점 방식 (설명: {ex['provider']}/{ex['model']}, 채점 코드를 읽고 쓴 것):\n{read(out).strip()}\n\n"
+            f"코드 원문: {EVAL}/ ({', '.join(p.name for p in codes)})")
+
+
 def phase_gate_pilot():
     while True:
-        say(f"[{RUN_ID}] 파일럿 완료. 채점기 확인이 필요합니다.\n"
-            f"파일럿은 채점 코드와 후보가 돌아가는지 보는 최소 규모 실행입니다. 후보를 빼거나 순위를 바꾸지 않습니다.\n\n"
+        say(f"[{RUN_ID}] 파일럿 완료. 채점 방식 확인이 필요합니다.\n\n"
             f"{read(OUT / '03_pilot' / 'pilot_table.md')}\n"
-            f"파일럿 판정 기준: {(CFG.get('falsification') or {}).get('pilot_check', '-')}\n\n"
-            f"metrics.py\n```\n{read(EVAL / 'metrics.py')}\n```")
+            f"파일럿 판정 기준: {(CFG.get('falsification') or {}).get('pilot_check', '-')}\n\n{explain_scoring()}")
         a = ask("Enter 또는 y: 잠그고 본 실험 | q: 종료 | 그 밖의 글: 평가 코드 수정 지시 > ")
         if a.lower() in ("", "y"):
             lock_eval()
@@ -806,6 +860,36 @@ def phase_audit():
     agent("reporter", st["reporter"], prompt("phase5_report.md", **ctx, critique=read(OUT / "05_audit.md"),
                                              notes=tail(MAIN / "notes.md", 80), env=read(OUT / "env.txt")[:3000]),
           OUT / "06_report.md", "readonly", human=True)
+    if st.get("checker"):
+        check_report(st["checker"], ctx)
+
+
+def check_report(ch, ctx):
+    # 보고서를 다른 벤더 모델이 결과 파일과 대조한다. 검토자는 고칠 문장(원문 그대로)과 고친 문장만 내고,
+    # 제어기가 그 문장만 바꾼다(나머지 글은 그대로). 고친 내용은 보고서 끝 '검토 기록'에 남긴다
+    draft = read(OUT / "06_report.md")
+    (OUT / "06_report_draft.md").write_text(draft)
+    try:
+        _, fixes = agent_json("checker", ch, prompt("phase5_check.md", **ctx, report=draft,
+                                                    comparison=read(MAIN / "comparison_all.md", "없음")),
+                              OUT / "05_audit" / "report_check.md", "readonly", parse_fixes, FIX_SCHEMA)
+    except ValueError:
+        fixes = None
+    rep, done, missed = draft, [], []
+    for f in fixes or []:
+        if f["find"] and f["find"] in rep:
+            rep = rep.replace(f["find"], f["replace"], 1)
+            done.append(f)
+        else:
+            missed.append(f)
+    who = f"{ch['provider']}/{ch['model']}"
+    if fixes is None:
+        log = f"검토: {who}. 검토 응답의 형식을 받지 못해 고치지 않았다."
+    else:
+        log = f"검토: {who}. 수치와 결론을 결과 파일과 대조해 고친 곳 {len(done)}개.\n" + "".join(
+            f"- \"{f['find']}\" → \"{f['replace']}\" ({f.get('why', '')})\n" for f in done) + "".join(
+            f"- 보고서에서 원문을 찾지 못해 고치지 않은 지적: \"{f['find']}\" ({f.get('why', '')})\n" for f in missed)
+    (OUT / "06_report.md").write_text(f"{rep.rstrip()}\n\n## 검토 기록\n\n{log}")
 
 
 # ---- 마지막: 보고서 확인 → 커밋 하나로 합쳐 원본 저장소의 새 브랜치로 가져와 push

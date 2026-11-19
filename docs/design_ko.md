@@ -35,7 +35,7 @@ CLI 비대화형 호출을 기본값으로 두고, 단일 라우터(`llm_router.
 
 ### 2.2 설정의 분리와 체급 승격 사다리
 
-1. 파이썬 코드 고정 영역: 모델 이름이나 호출 개수는 코드에 넣지 않는다. 코드는 실행당 호출 상한, 한도 초과 대체, 배열 길이만큼의 반복 실행, 그리고 작성 모델과 반박·감사 모델의 계열 분리(트랙 C의 prover와 refuter는 다른 벤더, Phase 5 감사자에는 본 실험 벤더가 없음, 시작할 때 검사)만 집행한다. 한도 초과로 대체 모델로 바뀐 뒤의 계열 분리까지는 보장하지 않는다.
+1. 파이썬 코드 고정 영역: 모델 이름이나 호출 개수는 코드에 넣지 않는다. 코드는 실행당 호출 상한, 한도 초과 대체, 배열 길이만큼의 반복 실행, 그리고 작성 모델과 반박·감사 모델의 계열 분리(트랙 C의 prover와 refuter는 다른 벤더, Phase 5 감사자에는 본 실험 벤더가 없음, 보고서 검토자는 보고 모델과 다른 벤더, 시작할 때 검사)만 집행한다. 시작할 때 명세의 모든 모델 슬롯(`after_quota` 포함)의 벤더, 모델 별명, 추론 단계도 `providers.yaml`과 대조해, 오타가 있으면 그 단계가 호출되기 전에 멈춘다. 한도 초과로 대체 모델로 바뀐 뒤의 계열 분리까지는 보장하지 않는다.
 2. 설정의 분리 (항목마다 정하는 곳은 한 곳뿐이다):
    - `providers.yaml`: 벤더를 어떻게 부르는지만 둔다(모델 ID, CLI 플래그, 승격 사다리, 대체 모델, 한도 초과 문구). 명세에는 나오지 않는다. 전역 파일은 `~/autoresearch/providers.yaml`이고, `/research-spec`이 명세를 만들 때 실행 폴더에 사본을 둔다. 제어기는 실행 폴더 사본이 있으면 그것을 쓴다. 그래서 명세를 만든 뒤 전역 파일을 고쳐도 그 실행은 영향을 받지 않고, 그 실행에만 다른 모델 ID나 플래그를 쓰려면 사본만 고친다.
    - 실행 명세 `00_spec.md`: 무엇을 얼마나 부를지를 전부 적는다(`stages`의 단계별 모델 배정 전체, `budget.run_limits` 호출 상한). 실행 때 명세에 적힌 값이 그대로 쓰이고, 다른 파일이 덮어쓰지 않는다. 쓰는 트랙의 단계나 budget 항목이 빠져 있으면 제어기가 시작하지 않는다.
@@ -76,12 +76,13 @@ CLI 비대화형 호출을 기본값으로 두고, 단일 라우터(`llm_router.
 | `phase2_ideation.divergers` | 추상 물리·수리 추론 및 타 분야 이식 | `[claude/fable/high, claude/opus/xhigh, agy/neon/xhigh]` | 읽기 전용 |
 | `phase2_ideation.critics` | diverger와 1:1 토론, 후보별 채택·보완 요청·탈락 판정 | `[agy/neon/xhigh, codex/sol/xhigh]` | 읽기 전용 |
 | `phase2_ideation.selector` | 다문서 종합 및 최종 후보 확정 | `claude/opus/xhigh` | 읽기 전용 |
-| `phase3_pilot.builder` | 50줄 채점기, 점검 스크립트, 파일럿 구현 | `claude/opus/high` | 전체 허용 |
+| `phase3_pilot.builder` | 50줄 채점기, 점검 스크립트, 파일럿 구현 | `claude/opus/xhigh` | 전체 허용 |
+| `phase3_pilot.explainer` (선택) | 관문에서 채점 코드가 하는 일을 쉬운 말로 설명 | `agy/neon/high` | 읽기 전용 |
 | `crash_repair` | 실행 오류 수리 | `claude/opus/high` | 전체 허용 |
 | `phase4_track_a.experimenter` | 실험 통제, 고전 대조군, 구간 분석 | `claude/opus/xhigh` | 전체 허용 |
 | `phase4_track_b` | 반복 최적화 + 정체 돌파 | 주력 `claude/opus/high` / 자문 `agy/neon/xhigh` | 주력 전체 허용, 자문 읽기 전용 |
 | `phase4_track_c` | 증명 작성 ↔ 반례 탐색 | 작성 `claude/fable/xhigh` (상한 뒤 `opus/max`) / 반박 `codex/astra/high` (상한 뒤 `agy/neon/xhigh`) | 작성 읽기 전용, 반박 전체 허용 |
-| `phase5_audit` | 이종 계열 적대적 감사 + 보고서 | 감사 `[agy/neon/high, codex/sol/high]` / 보고 `claude/opus/high` | 읽기 전용 |
+| `phase5_audit` | 이종 계열 적대적 감사 + 보고서 + 보고서 검토 | 감사 `[agy/neon/high, codex/sol/high]` / 보고 `claude/opus/high` / 검토 `agy/neon/high` (선택) | 읽기 전용 |
 
 기본 배정표로 트랙 C를 3라운드 돌리면 Codex 호출이 5번(비평 1, 반박 3, 감사 1) 필요하다. Codex 상한이 3회이므로 4번째부터는 agy로 넘어간다.
 
@@ -230,7 +231,7 @@ stages:                           # 단계별 모델 배정 전체 (2.4절 표).
   phase4_track_a: {experimenter: {...}}
   phase4_track_b: {worker: {...}, unstuck_peer: {...}}
   phase4_track_c: {prover: {..., after_quota: {...}}, refuter: {..., after_quota: {...}}}
-  phase5_audit: {auditors: [...], reporter: {...}}
+  phase5_audit: {auditors: [...], reporter: {...}, checker: {...}}
 falsification:
   pilot_check: "<파일럿에서 볼 최소 신호>"
 ```
@@ -287,7 +288,7 @@ falsification:
 2. 실험은 제어기가 돌린다: 에이전트는 코드와 실행 스크립트만 만들고, 제어기가 `build_cmd` → 실행 스크립트(`timing_rule: second_pass`면 두 번) → `metrics.py`를 돌린다. 실행 자체가 비정상 종료(`crash`)하면 가설 실패(`discard`)로 버리지 않고, `max_crash_repairs`(기본 3회) 안에서 수리 에이전트가 실행 오류만 고친 뒤 다시 돈다(잠긴 파일 수정은 불가).
 3. 자동 점검: 제어기가 정답 폴더를 비우고 `prepare.py`로 정답을 새로 만든 뒤 `test_gate.py`를 실행한다. 실패하면 같은 횟수 안에서 수리한다.
 4. 최소 규모 파일럿: 트랙 A는 후보와 기준선의 `run.sh`를 돌린다. 트랙 B는 현재 코드로 `run_bench.sh`를 한 번 측정한다(최적화 후보는 Phase 4 루프에서 시도한다). 트랙 A는 선별 후보 중 guard를 통과한 것이 하나도 없으면(기준선은 세지 않는다), 트랙 B는 현재 코드가 guard를 통과하지 못하면 조기 종료하고 Slack으로 보고한다. guard는 결과의 형식과 정상 여부만 본다. 후보가 기준선보다 나은지(`pilot_check`)는 제어기가 판정하지 않고 파일럿 관문에서 사람이 본다.
-5. 본 실험 진입 전 사람 확인 (Slack 알림 + tmux 대기): 파일럿 비교 표, 파일럿 판정 기준, `metrics.py` 전문을 보낸다.
+5. 본 실험 진입 전 사람 확인 (Slack 알림 + tmux 대기): 파일럿 비교 표, 파일럿 판정 기준, 채점 방식 설명을 보낸다. 채점 방식 설명은 `explainer`(builder와 다른 벤더 권장)가 채점 코드(`prepare.py`, `metrics.py`, `test_gate.py` 등)를 읽고 데이터, 지표의 뜻과 방향, 통과 조건, 비교 방식, 명세와 다른 점을 15줄 이내의 쉬운 말로 쓴 것이다(`03_pilot/scoring_explained.md`). 코드를 쓴 모델이 아니라 다른 모델이 실제 코드를 읽고 쓰므로, 의도와 코드가 어긋나면 드러난다. 코드 원문은 경로만 붙인다. 채점 코드가 바뀌었을 때만 다시 설명한다. `explainer`가 명세에 없으면 `metrics.py` 원문을 보낸다(2026-11-19 사람이 붙은 시험에서 코드 원문은 읽기 번거롭다는 의견에 따라 바꿨다).
    - `Enter`(또는 `y`): `evaluation/` 아래 모든 파일과 `split_lock` 파일을 읽기 전용(`chmod 444`)으로 바꾸고 SHA-256(Secure Hash Algorithm 256-bit, 파일 내용이 한 글자라도 바뀌면 값이 달라지는 256비트 무결성 지문) 해시를 `state.json`과 `lock.json`에 적는다. 파일럿 코드를 작업 브랜치에 커밋해 Phase 4의 기준 커밋으로 삼는다.
    - 한글 수정 지시문: builder 에이전트가 평가 코드를 고치고, 자동 점검과 파일럿을 다시 돌린 뒤 다시 보여 준다.
    - `q`: 종료한다.
@@ -369,6 +370,8 @@ Phase 4 주력 모델과 다른 계열의 모델(제어기가 시작할 때 검�
 7. 결론이나 보고에 쓰인 수치가 제어기가 채점한 결과(`comparison.md`, `results.tsv`, `score.json`)인지, 에이전트가 직접 계산해 채점되지 않은 수치인지
 
 감사 뒤 잠긴 파일의 해시를 다시 대조하고, 보고 모델이 `06_report.md`를 쓴다. 최종 보고서의 모든 수치는 결과 파일을 다시 읽어 정확한 파일 경로, 키(또는 줄 번호), 실행 환경(`env.txt`)을 인용한다.
+
+보고서 검토(`checker`, 선택, 보고 모델과 다른 벤더): 감사는 보고서보다 먼저 돌기 때문에 보고서 자체를 확인하는 단계가 따로 있다(2026-11-19 장난감 실행에서 결론 문장 하나가 표와 어긋났는데 그대로 나갔다). 검토자는 보고서의 수치를 결과 파일과 대조하고, 결론의 "모두", "항상" 같은 말이 표의 모든 행에서 맞는지, 확인을 건너뛴 문장이 있는지 본다. 검토자는 고칠 문장(원문 그대로)과 고친 문장만 JSON으로 내고, 제어기가 그 문장만 바꿔 나머지 글은 그대로 둔다. 고친 내용과 원문을 찾지 못한 지적은 보고서 끝 `검토 기록`에 남기고, 검토 전 원고는 `06_report_draft.md`로 남긴다.
 
 ### 마무리: 보고서 확인과 원본으로 push
 

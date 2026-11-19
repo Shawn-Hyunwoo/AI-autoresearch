@@ -46,7 +46,8 @@ stages:                           # 단계별 모델 배정. 쓰는 트랙의 �
       - {provider: codex, model: sol, effort: xhigh}
     selector: {provider: claude, model: opus, effort: xhigh}
   phase3_pilot:
-    builder: {provider: claude, model: opus, effort: high}
+    builder: {provider: claude, model: opus, effort: xhigh}   # 채점 코드를 쓴다. 틀리면 뒤 단계가 모두 틀리므로 강하게 둔다
+    explainer: {provider: agy, model: neon, effort: high}    # 파일럿 관문에서 채점 코드가 하는 일을 자연어로 설명. builder와 다른 벤더 권장
   crash_repair: {provider: claude, model: opus, effort: high}
   phase4_track_a:
     experimenter: {provider: claude, model: opus, effort: xhigh}
@@ -63,6 +64,7 @@ stages:                           # 단계별 모델 배정. 쓰는 트랙의 �
       - {provider: agy, model: neon, effort: high}
       - {provider: codex, model: sol, effort: high}
     reporter: {provider: claude, model: opus, effort: high}
+    checker: {provider: agy, model: neon, effort: high}      # 보고서의 수치·결론을 결과 파일과 대조해 틀린 문장만 고친다. reporter와 다른 벤더
 falsification:
   pilot_check: "<파일럿에서 볼 최소 신호: 단순 기준선 대비 차이, 수치 발산 없음 등>"
 ```
