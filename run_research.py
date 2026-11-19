@@ -118,13 +118,22 @@ def say(msg):
 
 
 def ask(prompt):
+    # 관문 입력. readline을 켜면 방향키·Home·End·Delete가 키 코드로 들어가지 않고 줄 편집으로 동작한다.
+    # 그래도 키 코드(ESC로 시작: 방향키, Ctrl/Shift+방향키, PgUp/PgDn, F키, Alt+키 등)나 제어 문자가 남으면 다시 묻는다.
+    try:
+        import readline  # noqa: F401
+    except ImportError:
+        pass
     while True:
         try:
-            a = input(prompt).strip()
+            a = input(prompt)
         except EOFError:
             raise Stop("입력을 받을 수 없음(tmux 밖 실행). tmux에서 --resume으로 이어서 실행")
-        if any(ord(c) < 32 or ord(c) == 127 for c in a):   # 방향키(ESC [ B) 같은 제어 문자가 섞이면 지시로 받지 않는다
-            print("방향키 같은 제어 문자가 섞여 있어 받지 않았습니다. 다시 입력하세요. "
+        except KeyboardInterrupt:
+            raise Stop("관문에서 Ctrl-C로 멈춤. 이어 하려면 --resume", by_user=True)
+        a = a.replace("\x1b[200~", "").replace("\x1b[201~", "").replace("\t", " ").strip()   # 붙여넣기 표시, 탭
+        if any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 for c in a):
+            print("방향키 같은 키 코드가 섞여 있어 받지 않았습니다. 다시 입력하세요. "
                   "(화면 스크롤은 Ctrl-b 다음 [, 나올 때는 q)", flush=True)
             continue
         return a
