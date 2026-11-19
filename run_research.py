@@ -504,7 +504,8 @@ def pilot_runs():
     else:  # ponytail: 트랙 B 파일럿은 현재 코드 측정만. 최적화 후보는 Phase 3 루프에서 시도한다
         cases = {"current_code": EVAL / "run_bench.sh"}
     rows = {name: run_case(pilot / name, script) for name, script in cases.items()}
-    table = "| case | status | guard_pass | primary_metric | wall_time_sec |\n|---|---|---|---|---|\n" + "".join(
+    table = "파일럿: 최소 규모 동작 확인 (성능 순위가 아님)\n\n" \
+        "| case | status | guard_pass | primary_metric | wall_time_sec |\n|---|---|---|---|---|\n" + "".join(
         f"| {k} | {v['status']} | {v.get('guard_pass')} | {v.get('primary_metric')} | {v.get('wall_time_sec')} |\n"
         for k, v in rows.items())
     (pilot / "pilot_table.md").write_text(table)
@@ -532,7 +533,9 @@ def phase_pilot():
 
 def phase_gate_pilot():
     while True:
-        say(f"[{RUN_ID}] 파일럿 완료. 채점기 확인이 필요합니다.\n\n{read(OUT / '02_pilot' / 'pilot_table.md')}\n"
+        say(f"[{RUN_ID}] 파일럿 완료. 채점기 확인이 필요합니다.\n"
+            f"파일럿은 채점 코드와 후보가 돌아가는지 보는 최소 규모 실행입니다. 후보를 빼거나 순위를 바꾸지 않습니다.\n\n"
+            f"{read(OUT / '02_pilot' / 'pilot_table.md')}\n"
             f"파일럿 판정 기준: {(CFG.get('falsification') or {}).get('pilot_check', '-')}\n\n"
             f"metrics.py\n```\n{read(EVAL / 'metrics.py')}\n```")
         a = ask("Enter 또는 y: 잠그고 본 실험 | q: 종료 | 그 밖의 글: 평가 코드 수정 지시 > ")
