@@ -37,7 +37,7 @@ CLI 비대화형 호출을 기본값으로 두고, 단일 라우터(`llm_router.
 
 1. 파이썬 코드 고정 영역: 모델 이름이나 호출 개수는 코드에 넣지 않는다. 코드는 실행당 호출 상한, 한도 초과 대체, 배열 길이만큼의 반복 실행, 그리고 작성 모델과 반박·감사 모델의 계열 분리(트랙 C의 prover와 refuter는 다른 벤더, Phase 4 감사자에는 본 실험 벤더가 없음, 시작할 때 검사)만 집행한다. 한도 초과로 대체 모델로 바뀐 뒤의 계열 분리까지는 보장하지 않는다.
 2. 설정의 분리 (항목마다 정하는 곳은 한 곳뿐이다):
-   - 도구 `~/autoresearch/providers.yaml`: 벤더를 어떻게 부르는지만 둔다(모델 ID, CLI 플래그, 승격 사다리, 대체 모델, 한도 초과 문구). 명세에는 나오지 않는다.
+   - `providers.yaml`: 벤더를 어떻게 부르는지만 둔다(모델 ID, CLI 플래그, 승격 사다리, 대체 모델, 한도 초과 문구). 명세에는 나오지 않는다. 전역 파일은 `~/autoresearch/providers.yaml`이고, `/research-spec`이 명세를 만들 때 실행 폴더에 사본을 둔다. 제어기는 실행 폴더 사본이 있으면 그것을 쓴다. 그래서 명세를 만든 뒤 전역 파일을 고쳐도 그 실행은 영향을 받지 않고, 그 실행에만 다른 모델 ID나 플래그를 쓰려면 사본만 고친다.
    - 실행 명세 `00_spec.md`: 무엇을 얼마나 부를지를 전부 적는다(`stages`의 단계별 모델 배정 전체, `budget.run_limits` 호출 상한). 실행 때 명세에 적힌 값이 그대로 쓰이고, 다른 파일이 덮어쓰지 않는다. 쓰는 트랙의 단계나 budget 항목이 빠져 있으면 제어기가 시작하지 않는다.
    - 프로젝트 기본값 `<프로젝트>/.autoresearch/defaults.yaml` (선택): 실행 때는 읽지 않는다. Phase 0이 명세를 만들 때 처음 채우는 값으로만 쓴다. 이 파일이 없으면 같은 프로젝트의 직전 명세, 그것도 없으면 도구의 명세 템플릿 값을 쓴다.
    - 예를 들어 명세의 `divergers` 배열을 5줄로 늘리면 코드 수정 없이 5개의 독립 발산 세션이 실행된다(같은 모델을 여러 줄 넣을 때는 `lens: "통계물리 관점"`처럼 관점 태그를 붙여 중복 답변을 막는다).
@@ -180,7 +180,7 @@ stages:
 
 ### Phase 0: 대화형 연구 구체화 (`/research-spec`)
 
-원본 프로젝트 폴더에서 `claude`를 열고 `/research-spec <연구 질문>`으로 문답하며 `00_spec.md`를 완성한다. 명령 파일은 레포의 `commands/research-spec.md`이고, `~/.claude/commands/research-spec.md`에 심볼릭 링크로 연결해 모든 프로젝트가 같이 쓴다. 이 명령은 명세 템플릿에 프로젝트 기본값(`.autoresearch/defaults.yaml`, 없으면 같은 프로젝트의 직전 명세)을 채워 제안하고, 확정된 명세를 `~/autoresearch_runs/<프로젝트>/<YYYY-MM-DD>_<주제>/00_spec.md`에 쓴다. 클론과 venv는 만들지 않는다.
+원본 프로젝트 폴더에서 `claude`를 열고 `/research-spec <연구 질문>`으로 문답하며 `00_spec.md`를 완성한다. 명령 파일은 레포의 `commands/research-spec.md`이고, `~/.claude/commands/research-spec.md`에 심볼릭 링크로 연결해 모든 프로젝트가 같이 쓴다. 이 명령은 명세 템플릿에 프로젝트 기본값(`.autoresearch/defaults.yaml`, 없으면 같은 프로젝트의 직전 명세)을 채워 제안하고, 확정된 명세를 `~/autoresearch_runs/<프로젝트>/<YYYY-MM-DD>_<주제>/00_spec.md`에, 전역 `providers.yaml`의 사본을 같은 폴더에 쓴다. 그리고 프로젝트의 `.autoresearch/runs/<run_id>/`에 이 두 파일을 가리키는 심볼릭 링크를 만든다(여러 폴더를 오가지 않고 프로젝트 안에서 열어 고칠 수 있게. 실제 파일은 하나라 어긋나지 않는다). 링크 폴더는 프로젝트의 `.git/info/exclude`(커밋되지 않는 로컬 설정)에 넣는다. 실행 명령의 `--spec`에는 이 링크 경로를 써도 된다. 클론과 venv는 만들지 않는다.
 
 명세는 제어기가 읽는 `yaml` 블록과 에이전트가 읽는 줄글로 구성된다(`~/autoresearch/templates/00_spec_template.md`). 실행 때는 이 yaml 블록의 값이 그대로 쓰인다.
 
@@ -497,10 +497,12 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 <프로젝트>/                               # 원본 저장소 (마지막 push 확인 전까지 변화 없음)
 ├── AGENTS.md (또는 CLAUDE.md)            # 저장소 고유 규칙 (에이전트가 Phase 1에서 읽음)
 ├── .autoresearch/defaults.yaml          # 프로젝트 기본값 (Phase 0이 명세를 채울 때만 읽음)
+├── .autoresearch/runs/<run_id>/         # 실행 폴더의 00_spec.md, providers.yaml을 가리키는 링크 (git에서 제외)
 └── research_runs/<run_id>/              # push로 들어온 실행 결과 (브랜치 autoresearch/<run_id>)
 
 ~/autoresearch_runs/<프로젝트>/<run_id>/   # 실행 폴더 (프로젝트 git 트리 밖)
 ├── 00_spec.md                           # Phase 0: 확정된 명세
+├── providers.yaml                       # 전역 providers.yaml의 사본 (이 실행은 이것을 쓴다)
 ├── state.json                           # 진행 상태 체크포인트 (--resume)
 ├── llm_logs/                            # 보낸 프롬프트와 CLI 출력 전체
 ├── venv/                                # 실행 전용 venv (base_env 위)

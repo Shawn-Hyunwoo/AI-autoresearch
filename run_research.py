@@ -46,7 +46,8 @@ PY = str(VENV / "bin" / "python")
 SPEC_TEXT = SPEC_PATH.read_text()
 CFG = yaml.safe_load(re.search(r"```yaml\n(.*?)\n```", SPEC_TEXT, re.S).group(1))
 SRC = Path(CFG["source_repo"]).expanduser().resolve()
-PROV = yaml.safe_load((TOOL / "providers.yaml").read_text())
+PROV_PATH = RUN / "providers.yaml" if (RUN / "providers.yaml").exists() else TOOL / "providers.yaml"   # 실행 폴더 사본 우선
+PROV = yaml.safe_load(PROV_PATH.read_text())
 TRACKS = CFG["track"] if isinstance(CFG["track"], list) else [t.strip() for t in str(CFG["track"]).split(",")]
 STAGES, BUDGET = CFG.get("stages") or {}, CFG.get("budget") or {}
 NEED = ["phase1_recon", "phase1_5_ideation", "crash_repair", "phase4_audit"] \
@@ -405,7 +406,7 @@ def phase_workspace():
     STATE["best_commit"] = STATE["best_commit"] or STATE["base_commit"]
     OUT.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SPEC_PATH, OUT / "00_spec.md")
-    shutil.copy2(TOOL / "providers.yaml", OUT / "providers.yaml")   # 이번 실행 때의 벤더 호출 규격 기록
+    shutil.copy2(PROV_PATH, OUT / "providers.yaml")   # 이번 실행 때의 벤더 호출 규격 기록
     if not VENV.exists():
         sh([base_python(CFG["base_env"]), "-m", "venv", "--system-site-packages", str(VENV)], cwd=RUN)
         for c in CFG.get("setup_cmds") or []:

@@ -61,6 +61,7 @@ Phase 4   다른 계열 모델의 감사 → 보고서
 ```
 <프로젝트>/
 ├── .autoresearch/defaults.yaml     (선택) 이 프로젝트에서 늘 같은 값: env, 설치 명령, 자주 쓰는 모델 배정
+├── .autoresearch/runs/<run_id>/    실행 폴더의 00_spec.md, providers.yaml을 가리키는 링크 (git에서 제외)
 └── research_runs/<run_id>/         push를 승인하면 브랜치 autoresearch/<run_id>로 들어오는 결과
 ```
 
@@ -69,6 +70,7 @@ Phase 4   다른 계열 모델의 감사 → 보고서
 ```
 ~/autoresearch_runs/<프로젝트>/<run_id>/
 ├── 00_spec.md        이번 실행의 명세. "무엇을 얼마나" 부를지 전부 여기에
+├── providers.yaml    전역 providers.yaml의 사본. 이 실행은 이것을 쓴다
 ├── state.json        진행 상태. 끊겨도 --resume으로 이어감
 ├── llm_logs/         모델에 보낸 프롬프트와 출력 전체
 ├── venv/             실행 전용 venv (기준 env의 패키지를 그대로 보고 새 설치만 여기에)
@@ -187,6 +189,7 @@ Four rules:
 ```
 <project>/
 ├── .autoresearch/defaults.yaml     (optional) values that never change for this project: env, install commands, usual model assignment
+├── .autoresearch/runs/<run_id>/    links to the run folder's 00_spec.md and providers.yaml (excluded from git)
 └── research_runs/<run_id>/         results that arrive on branch autoresearch/<run_id> when you approve the push
 ```
 
@@ -195,6 +198,7 @@ Four rules:
 ```
 ~/autoresearch_runs/<project>/<run_id>/
 ├── 00_spec.md        the spec for this run. Everything about WHAT to call and HOW MUCH is here
+├── providers.yaml    copy of the global providers.yaml; this run uses the copy
 ├── state.json        progress checkpoint, used by --resume
 ├── llm_logs/         every prompt sent and every CLI output
 ├── venv/             per-run venv (sees the base env's packages, new installs go here)

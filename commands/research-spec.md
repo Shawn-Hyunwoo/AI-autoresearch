@@ -24,11 +24,25 @@ argument-hint: <연구 질문>
    - 단계별 모델 배정(`stages`)과 호출 상한(`budget.run_limits`): 기본값을 표로 보여 주고 바꿀 것을 묻는다. 명세에는 쓰는 트랙의 단계를 빠짐없이 적는다(실행 때 명세의 값이 그대로 쓰이고 다른 곳에서 채워지지 않는다). 모델과 추론 단계는 providers.yaml에 있는 것만 쓴다. 트랙 C의 prover와 refuter는 다른 벤더, Phase 4 auditors에는 Phase 3 주력 모델의 벤더가 없어야 한다
    - 이 프로젝트에서 계속 쓸 값이라고 하면 `<프로젝트>/.autoresearch/defaults.yaml`에 적을지 묻는다(같은 키 구조, 늘 같은 것만)
 3. 연구 질문, 가설, 허용 가정을 명세 본문에 평문으로 정리한다. guard와 metric이 실제로 계산할 수 있는 형태인지 확인한다. 계산 방법이 모호하면 묻는다.
-4. 확정되면 `~/autoresearch_runs/<프로젝트명>/<YYYY-MM-DD>_<짧은_영문_주제>/00_spec.md`에 쓴다. 프로젝트명은 source_repo 폴더 이름이다. 클론이나 venv는 만들지 않는다(제어기가 만든다).
-5. 마지막에 실행 명령을 보여 준다. PyYAML이 있는 python으로 실행해야 한다.
+4. 확정되면 실행 폴더 `~/autoresearch_runs/<프로젝트명>/<YYYY-MM-DD>_<짧은_영문_주제>/`를 만들고 두 파일을 둔다. 프로젝트명은 source_repo 폴더 이름이다. 클론이나 venv는 만들지 않는다(제어기가 만든다).
+   - `00_spec.md`: 확정한 명세
+   - `providers.yaml`: `~/autoresearch/providers.yaml`의 사본 (이 실행은 이 사본을 쓴다)
+5. 프로젝트에서 바로 볼 수 있게 심볼릭 링크를 만든다. 실제 파일은 실행 폴더에 하나뿐이고, 링크로 열어 고쳐도 같은 파일이 고쳐진다.
+   ```bash
+   mkdir -p <프로젝트>/.autoresearch/runs/<run_id>
+   ln -s ~/autoresearch_runs/<프로젝트명>/<run_id>/00_spec.md <프로젝트>/.autoresearch/runs/<run_id>/00_spec.md
+   ln -s ~/autoresearch_runs/<프로젝트명>/<run_id>/providers.yaml <프로젝트>/.autoresearch/runs/<run_id>/providers.yaml
+   grep -qxF '/.autoresearch/runs/' <프로젝트>/.git/info/exclude || echo '/.autoresearch/runs/' >> <프로젝트>/.git/info/exclude
    ```
+   `.git/info/exclude`는 커밋되지 않는 로컬 설정이라 원본 브랜치는 바뀌지 않는다.
+6. 마지막에 이렇게 안내한다.
+   - 기본값 그대로 갈 거면 바로 실행한다.
+   - 모델 배정이나 호출 상한을 바꾸려면 `.autoresearch/runs/<run_id>/00_spec.md`의 `stages`, `budget`을 고친다.
+   - 모델 ID나 CLI 플래그를 바꾸려면 같은 폴더의 `providers.yaml`을 고친다(이 실행에만 적용).
+   - 고친 뒤 tmux 안에서 한 번만 실행한다. PyYAML이 있는 python이어야 한다. 이미 돌고 있는 실행을 다른 터미널에서 다시 실행하지 않는다.
+   ```bash
    tmux new -s research
-   python ~/autoresearch/run_research.py --spec ~/autoresearch_runs/<프로젝트명>/<run_id>/00_spec.md
+   python ~/autoresearch/run_research.py --spec .autoresearch/runs/<run_id>/00_spec.md   # 프로젝트 폴더에서
    ```
 
 규칙: 한 번에 너무 많이 묻지 않는다. 사람이 정한 것은 다시 묻지 않는다. 추측한 값은 추측이라고 밝힌다.
