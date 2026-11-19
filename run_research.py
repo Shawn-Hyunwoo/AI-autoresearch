@@ -254,7 +254,6 @@ CRITIC_SCHEMA = ('```json\n{"verdicts": [{"id": "D1_A", "verdict": "accept|revis
                  '"request": "revise일 때만"}]}\n```')
 
 
-JUDGE_SCHEMA = '```json\n{"fatal_judgments": [{"n": 1, "verdict": "인정|반박", "note": "한 줄"}]}\n```'
 JUDGE_RE = re.compile(r"\n*```json\s*(\{[^`]*?\"fatal_judgments\"[^`]*?\})\s*```\s*", re.S)   # 보고서 끝의 판단 블록
 FIX_SCHEMA = '```json\n{"fixes": [{"find": "보고서 원문 그대로", "replace": "고친 문장", "why": "근거 파일과 값"}]}\n```'
 
@@ -619,7 +618,7 @@ def phase_recon():
 
 
 # ---- Phase 2: 아이디어 토론 → 선별. diverger마다 critic 한 명과 1:1로 최대 max_ideation_rounds회 주고받고,
-# 보완 요청이 남지 않으면 그 토론은 끝난다. 통과 후보가 없으면 탈락 사유를 넣어 한 번만 다시 토론한다
+# 보완 요청이 남지 않으면 그 토론은 끝난다. 통과 후보가 없으면 탈락 사유를 알리고 멈춘다
 def pair_critics(divs, crits):
     # diverger마다 critic 한 명. 다른 벤더 critic을 우선하고, 그중 덜 배정된 critic을 고른다
     used, out = [0] * len(crits), []
@@ -631,37 +630,37 @@ def pair_critics(divs, crits):
     return out
 
 
-def debate_turn(t, r, R, st, recon, d, sfx, feedback):
+def debate_turn(t, r, R, st, recon, d):
     # 토론 하나의 r회차: diverger 차례 → critic 차례. 비평자 판정 목록을 돌려준다 (형식을 끝내 못 맞추면 None)
     i, final = t["n"], r == R
     dslot, cslot = st["divergers"][i - 1], st["critics"][t["critic"]]
     rule = "이번이 마지막 판정이다. revise는 쓸 수 없다. 완벽하지 않아도 지금 내용으로 accept나 reject를 정한다." if final else ""
     if r == 1:
         body = prompt("phase2_diverge.md", n=i, track=",".join(TRACKS), lens=dslot.get("lens", "자유"), spec=SPEC_TEXT,
-                      recon=recon, feedback=feedback, max_rounds=R)
+                      recon=recon, max_rounds=R)
     else:
-        body = prompt("phase2_revise.md", round=r, max_rounds=R, critique=read(d / f"t{i:02d}_r{r - 1}_critic{sfx}.md"),
+        body = prompt("phase2_revise.md", round=r, max_rounds=R, critique=read(d / f"t{i:02d}_r{r - 1}_critic.md"),
                       last=" 이번 답 뒤의 판정이 마지막이고, 그때는 보완 요청 없이 채택이나 탈락으로 끝난다." if final else "")
-    reply = agent(f"ideation_d{i}", dslot, body, d / f"t{i:02d}_r{r}_diverger{sfx}.md", "readonly", session=t["dsess"])
+    reply = agent(f"ideation_d{i}", dslot, body, d / f"t{i:02d}_r{r}_diverger.md", "readonly", session=t["dsess"])
     if r == 1:
         cbody = prompt("phase2_critic.md", spec=SPEC_TEXT, recon=recon, ideas=reply, max_rounds=R, final_rule=rule)
     else:
         cbody = prompt("phase2_recritic.md", round=r, max_rounds=R, reply=reply, final_rule=rule,
                        open_ids=", ".join(k for k, v in t["verdicts"].items() if v["verdict"] == "revise"))
     try:
-        return agent_json(f"ideation_c{i}", cslot, cbody, d / f"t{i:02d}_r{r}_critic{sfx}.md", "readonly",
+        return agent_json(f"ideation_c{i}", cslot, cbody, d / f"t{i:02d}_r{r}_critic.md", "readonly",
                           parse_critique(final), CRITIC_SCHEMA, session=t["csess"])[1]
     except ValueError:
         return None
 
 
-def debate_log(t, d, sfx, rounds):
+def debate_log(t, d, rounds):
     # 선별자에게 넘길 토론 기록: 회차별 발산자 답과 비평자 판정, 후보별 최종 판정
     st, n = STAGES["phase2_ideation"], t["n"]
     dv, cr = st["divergers"][n - 1], st["critics"][t["critic"]]
     parts = [f"## 토론 {n}: diverger {dv['provider']}/{dv['model']} ↔ critic {cr['provider']}/{cr['model']}"]
     for r in range(1, rounds + 1):
-        dfile, cfile = d / f"t{n:02d}_r{r}_diverger{sfx}.md", d / f"t{n:02d}_r{r}_critic{sfx}.md"
+        dfile, cfile = d / f"t{n:02d}_r{r}_diverger.md", d / f"t{n:02d}_r{r}_critic.md"
         if dfile.exists():
             parts += [f"### {r}회차 발산자\n{read(dfile)}", f"### {r}회차 비평자\n{read(cfile, '없음')}"]
     parts.append("### 최종 판정\n" + ("".join(f"- {k}: {v['verdict']} ({v['round']}회차) {v.get('reason', '')}\n"
@@ -672,38 +671,30 @@ def debate_log(t, d, sfx, rounds):
 def phase_ideation():
     st, recon, d = STAGES["phase2_ideation"], read(OUT / "01_recon.md"), OUT / "02_ideation"
     R = int(BUDGET.get("max_ideation_rounds", 1))
-    I = STATE.setdefault("ideation", {"attempt": 1, "round": 0, "feedback": "없음", "threads": None})
-    while True:
-        sfx = "" if I["attempt"] == 1 else "_retry"
-        if I["threads"] is None:
-            I["threads"] = [{"n": i, "critic": j, "open": True, "verdicts": {},
-                             "dsess": {"history": str(d / f"t{i:02d}_diverger{sfx}.history.md")},
-                             "csess": {"history": str(d / f"t{i:02d}_critic{sfx}.history.md")}}
-                            for i, j in enumerate(pair_critics(st["divergers"], st["critics"]), 1)]
-            save_state()
-        while I["round"] < R and any(t["open"] for t in I["threads"]):
-            r = I["round"] + 1
-            opened = [t for t in I["threads"] if t["open"]]
-            print(f"  토론 {r}/{R}회차: {len(opened)}개 진행", flush=True)
-            with ThreadPoolExecutor(len(opened)) as ex:
-                res = list(ex.map(lambda t: debate_turn(t, r, R, st, recon, d, sfx, I["feedback"]), opened))
-            for t, vs in zip(opened, res):           # state는 모든 토론의 차례가 끝난 뒤 여기서만 고친다
-                for v in vs or []:
-                    t["verdicts"][str(v.get("id"))] = {**v, "round": r}
-                t["open"] = bool(vs) and any(v["verdict"] == "revise" for v in vs)
-            I["round"] = r
-            save_state()
-        logs = "\n\n".join(debate_log(t, d, sfx, I["round"]) for t in I["threads"])
-        (d / f"debates{sfx}.md").write_text(logs)
-        _, sel = agent_json("selector", st["selector"], prompt("phase2_select.md", spec=SPEC_TEXT, recon=recon, debates=logs),
-                            d / f"selector{sfx}.md", "readonly", parse_selection, SELECT_SCHEMA)
-        (d / "02_selected.json").write_text(json.dumps(sel, ensure_ascii=False, indent=2))
-        if sel.get("selected_candidates"):
-            return
-        if I["attempt"] == 2:
-            raise Stop("통과 후보 0개 (다시 토론한 뒤에도)")
-        I.update(attempt=2, round=0, threads=None, feedback=json.dumps(sel.get("dropped_candidates", []), ensure_ascii=False))
+    I = STATE.setdefault("ideation", {"round": 0, "threads": [
+        {"n": i, "critic": j, "open": True, "verdicts": {}, "dsess": {"history": str(d / f"t{i:02d}_diverger.history.md")},
+         "csess": {"history": str(d / f"t{i:02d}_critic.history.md")}}
+        for i, j in enumerate(pair_critics(st["divergers"], st["critics"]), 1)]})
+    while I["round"] < R and any(t["open"] for t in I["threads"]):
+        r = I["round"] + 1
+        opened = [t for t in I["threads"] if t["open"]]
+        print(f"  토론 {r}/{R}회차: {len(opened)}개 진행", flush=True)
+        with ThreadPoolExecutor(len(opened)) as ex:
+            res = list(ex.map(lambda t: debate_turn(t, r, R, st, recon, d), opened))
+        for t, vs in zip(opened, res):               # state는 모든 토론의 차례가 끝난 뒤 여기서만 고친다
+            for v in vs or []:
+                t["verdicts"][str(v.get("id"))] = {**v, "round": r}
+            t["open"] = bool(vs) and any(v["verdict"] == "revise" for v in vs)
+        I["round"] = r
         save_state()
+    logs = "\n\n".join(debate_log(t, d, I["round"]) for t in I["threads"])
+    (d / "debates.md").write_text(logs)
+    _, sel = agent_json("selector", st["selector"], prompt("phase2_select.md", spec=SPEC_TEXT, recon=recon, debates=logs),
+                        d / "selector.md", "readonly", parse_selection, SELECT_SCHEMA)
+    (d / "02_selected.json").write_text(json.dumps(sel, ensure_ascii=False, indent=2))
+    if not sel.get("selected_candidates"):   # 토론을 처음부터 다시 하지 않는다. 사유를 보고 명세를 고쳐 새로 실행한다
+        raise Stop("통과 후보 0개. 탈락 사유:\n" + "\n".join(
+            f"- {c.get('id')}: {c.get('reason', '')}" for c in sel.get("dropped_candidates") or []))
 
 
 # ---- Phase 3: 평가 하네스 작성 → 자동 점검 → 파일럿 (트랙 A/B)
@@ -1082,12 +1073,7 @@ def phase_audit():
         try:
             got = judgments(json.loads(blocks[-1]))
         except (IndexError, KeyError, TypeError, ValueError):
-            fixed = agent("reporter", st["reporter"], prompt("json_fix.md", schema=JUDGE_SCHEMA, text=text[-8000:]),
-                          OUT / "05_audit" / "fatal_judged_jsonfix.md", "readonly")
-            try:
-                got = judgments(block_json(fixed))
-            except (KeyError, TypeError, ValueError):
-                got = {}
+            got = {}                                    # 알림에 '판단 없음, 보고서 4절 확인'으로 나간다
         for n, x in enumerate(items, 1):
             x["verdict"], x["note"] = got.get(n, (None, ""))
     (OUT / "05_audit" / "fatal.json").write_text(

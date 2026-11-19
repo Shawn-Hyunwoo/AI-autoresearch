@@ -15,7 +15,7 @@ push_remote: "origin"             # 보고서 확인 뒤 새 브랜치를 push�
 workspace:
   focus_hint: []                  # 먼저 볼 모듈
 constraints:
-  timing_rule: "second_pass"      # 두 번 실행해 두 번째 시간만 쓴다. 속도 비교가 없으면 "single"
+  timing_rule: "single"           # 실행 한 번. "second_pass"면 두 번 돌려 두 번째 시간만 쓴다(첫 실행에 컴파일·캐시 비용이 섞일 때)
   split_lock: []                  # 읽기 전용으로 잠글 분할·시드 파일 (클론 기준 상대경로)
 evaluation_contract:
   guard: "<깨지면 안 되는 조건: 수치 발산 없음, 정확도 기준 등>"

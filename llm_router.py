@@ -1,5 +1,5 @@
 # 세 CLI(claude, agy, codex)를 비대화형으로 부르는 라우터.
-# 안전 수칙을 프롬프트 앞뒤에 붙이고, 실행당 호출 상한·한도 초과 대체·승격 사다리를 처리한다.
+# 안전 수칙을 프롬프트 앞뒤에 붙이고, 실행당 호출 상한·한도 초과 대체를 처리한다. 승격(escalate)은 본 실험 정체 때 제어기가 부른다.
 import json
 import os
 import re
@@ -164,10 +164,7 @@ def call(slot, body, out_file, *, mode, cwd, env, human=False, session=None):
                 STATE.setdefault("exhausted", []).append(slot["provider"])
                 slot = resolve(slot)
                 continue
-            fails += 1
-            if fails == 1:
-                slot = resolve(slot)               # 같은 슬롯으로 한 번 더
-            elif fails == 2:
-                slot = resolve(escalate(slot))     # 두 번 연속 실패면 한 칸 승격
-            else:
+            if fails:                              # 두 번째 실패면 멈춘다 (모델을 바꿔도 네트워크·CLI 문제는 안 풀린다)
                 raise RuntimeError(f"모델 호출 실패 rc={rc}: {slot}. 로그 {LOG_DIR / (tag + '.log')}")
+            fails = 1
+            slot = resolve(slot)                   # 같은 슬롯으로 한 번만 더
