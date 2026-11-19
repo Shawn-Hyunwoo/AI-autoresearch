@@ -114,7 +114,7 @@ defaults.yaml이 없으면 같은 프로젝트의 직전 명세를, 그것도 �
 ### 주의
 
 - 코드를 고치는 단계의 에이전트는 권한 확인 없이 명령을 실행합니다. 그런 실행을 받아들일 수 있는 서버에서만 쓰세요.
-- 에이전트와 제어기가 같은 리눅스 사용자로 돌기 때문에, 에이전트가 `hidden/`을 일부러 찾아 읽는 것까지는 막지 못합니다. 그 흔적은 Phase 4 감사가 봅니다.
+- 에이전트와 제어기가 같은 리눅스 사용자로 돌기 때문에, 에이전트가 `hidden/`을 일부러 찾아 읽는 것까지는 막지 못합니다. 그 흔적은 Phase 5 감사가 봅니다.
 - 아직 뼈대 단계입니다. 모델 응답(`reply ok`)과, 모델을 가짜 응답으로 바꾼 모의 실행으로 제어 흐름 전체는 확인했지만, 실제 모델로 끝까지 돌려 보지는 않았습니다.
 
 ### 라이선스
@@ -231,7 +231,7 @@ Without defaults.yaml, `/research-spec` uses the latest previous spec of the sam
 ### Caution
 
 - Agents in code-editing stages run commands without asking for permission. Use this only on a machine where that is acceptable.
-- Agents and the controller run as the same Linux user, so an agent that deliberately searches for `hidden/` can still read it. The Phase 4 audit looks for signs of that.
+- Agents and the controller run as the same Linux user, so an agent that deliberately searches for `hidden/` can still read it. The Phase 5 audit looks for signs of that.
 - This is a skeleton. Model responses (`reply ok`) and the whole control flow (with mocked model calls) have been checked, but it has not yet been run end to end with real models.
 
 ### License

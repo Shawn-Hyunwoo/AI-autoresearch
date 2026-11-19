@@ -35,7 +35,7 @@ CLI 비대화형 호출을 기본값으로 두고, 단일 라우터(`llm_router.
 
 ### 2.2 설정의 분리와 체급 승격 사다리
 
-1. 파이썬 코드 고정 영역: 모델 이름이나 호출 개수는 코드에 넣지 않는다. 코드는 실행당 호출 상한, 한도 초과 대체, 배열 길이만큼의 반복 실행, 그리고 작성 모델과 반박·감사 모델의 계열 분리(트랙 C의 prover와 refuter는 다른 벤더, Phase 4 감사자에는 본 실험 벤더가 없음, 시작할 때 검사)만 집행한다. 한도 초과로 대체 모델로 바뀐 뒤의 계열 분리까지는 보장하지 않는다.
+1. 파이썬 코드 고정 영역: 모델 이름이나 호출 개수는 코드에 넣지 않는다. 코드는 실행당 호출 상한, 한도 초과 대체, 배열 길이만큼의 반복 실행, 그리고 작성 모델과 반박·감사 모델의 계열 분리(트랙 C의 prover와 refuter는 다른 벤더, Phase 5 감사자에는 본 실험 벤더가 없음, 시작할 때 검사)만 집행한다. 한도 초과로 대체 모델로 바뀐 뒤의 계열 분리까지는 보장하지 않는다.
 2. 설정의 분리 (항목마다 정하는 곳은 한 곳뿐이다):
    - `providers.yaml`: 벤더를 어떻게 부르는지만 둔다(모델 ID, CLI 플래그, 승격 사다리, 대체 모델, 한도 초과 문구). 명세에는 나오지 않는다. 전역 파일은 `~/autoresearch/providers.yaml`이고, `/research-spec`이 명세를 만들 때 실행 폴더에 사본을 둔다. 제어기는 실행 폴더 사본이 있으면 그것을 쓴다. 그래서 명세를 만든 뒤 전역 파일을 고쳐도 그 실행은 영향을 받지 않고, 그 실행에만 다른 모델 ID나 플래그를 쓰려면 사본만 고친다.
    - 실행 명세 `00_spec.md`: 무엇을 얼마나 부를지를 전부 적는다(`stages`의 단계별 모델 배정 전체, `budget.run_limits` 호출 상한). 실행 때 명세에 적힌 값이 그대로 쓰이고, 다른 파일이 덮어쓰지 않는다. 쓰는 트랙의 단계나 budget 항목이 빠져 있으면 제어기가 시작하지 않는다.
@@ -71,15 +71,15 @@ CLI 비대화형 호출을 기본값으로 두고, 단일 라우터(`llm_router.
 | 단계 및 슬롯 | 요구 핵심 역량 | 기본 배정 `(provider / model / effort)` | 권한 |
 |---|---|---|---|
 | `phase1_recon` | 장문 코드 분석 + 다수 문헌 종합 | `[claude/opus/high (repo_scan), agy/neon/high (lit_search)]` | 읽기 전용 |
-| `phase1_5_ideation.divergers` | 추상 물리·수리 추론 및 타 분야 이식 | `[claude/fable/high, claude/opus/xhigh, agy/neon/xhigh]` | 읽기 전용 |
-| `phase1_5_ideation.critics` | 양자 개연성 및 중복·약점 전수 비평 | `[agy/neon/high, codex/sol/high]` (`critics_mode: "all"`) | 읽기 전용 |
-| `phase1_5_ideation.selector` | 다문서 종합 및 최종 후보 확정 | `claude/opus/xhigh` | 읽기 전용 |
-| `phase2_pilot.builder` | 50줄 채점기, 점검 스크립트, 파일럿 구현 | `claude/opus/high` | 전체 허용 |
+| `phase2_ideation.divergers` | 추상 물리·수리 추론 및 타 분야 이식 | `[claude/fable/high, claude/opus/xhigh, agy/neon/xhigh]` | 읽기 전용 |
+| `phase2_ideation.critics` | 양자 개연성 및 중복·약점 전수 비평 | `[agy/neon/high, codex/sol/high]` (`critics_mode: "all"`) | 읽기 전용 |
+| `phase2_ideation.selector` | 다문서 종합 및 최종 후보 확정 | `claude/opus/xhigh` | 읽기 전용 |
+| `phase3_pilot.builder` | 50줄 채점기, 점검 스크립트, 파일럿 구현 | `claude/opus/high` | 전체 허용 |
 | `crash_repair` | 실행 오류 수리 | `claude/opus/high` | 전체 허용 |
-| `phase3_track_a.experimenter` | 실험 통제, 고전 대조군, 구간 분석 | `claude/opus/xhigh` | 전체 허용 |
-| `phase3_track_b` | 반복 최적화 + 정체 돌파 | 주력 `claude/opus/high` / 자문 `agy/neon/xhigh` | 주력 전체 허용, 자문 읽기 전용 |
-| `phase3_track_c` | 증명 작성 ↔ 반례 탐색 | 작성 `claude/fable/xhigh` (상한 뒤 `opus/max`) / 반박 `codex/astra/high` (상한 뒤 `agy/neon/xhigh`) | 작성 읽기 전용, 반박 전체 허용 |
-| `phase4_audit` | 이종 계열 적대적 감사 + 보고서 | 감사 `[agy/neon/high, codex/sol/high]` / 보고 `claude/opus/high` | 읽기 전용 |
+| `phase4_track_a.experimenter` | 실험 통제, 고전 대조군, 구간 분석 | `claude/opus/xhigh` | 전체 허용 |
+| `phase4_track_b` | 반복 최적화 + 정체 돌파 | 주력 `claude/opus/high` / 자문 `agy/neon/xhigh` | 주력 전체 허용, 자문 읽기 전용 |
+| `phase4_track_c` | 증명 작성 ↔ 반례 탐색 | 작성 `claude/fable/xhigh` (상한 뒤 `opus/max`) / 반박 `codex/astra/high` (상한 뒤 `agy/neon/xhigh`) | 작성 읽기 전용, 반박 전체 허용 |
+| `phase5_audit` | 이종 계열 적대적 감사 + 보고서 | 감사 `[agy/neon/high, codex/sol/high]` / 보고 `claude/opus/high` | 읽기 전용 |
 
 기본 배정표로 트랙 C를 3라운드 돌리면 Codex 호출이 5번(비평 1, 반박 3, 감사 1) 필요하다. Codex 상한이 3회이므로 4번째부터는 agy로 넘어간다.
 
@@ -134,11 +134,11 @@ push_remote: "origin"
 budget:
   run_limits: {fable: 3, codex: 3}
 stages:
-  phase3_track_b:
+  phase4_track_b:
     worker: {provider: claude, model: opus, effort: xhigh}
 ```
 
-## 3. 전체 워크플로 아키텍처 (Phase 0 ~ Phase 4)
+## 3. 전체 워크플로 아키텍처 (Phase 0 ~ Phase 5)
 
 ```text
 [Phase 0: 대화형 연구 구체화 (원본 프로젝트에서 /research-spec)]
@@ -153,15 +153,15 @@ stages:
     [Phase 1: 내부 코드 조사 + 다중 모델 선행연구 조사 (SoTA 및 중복 필터 추출)]
                                 |
                                 v
-    [Phase 1.5: 트랙 맞춤 창의적 양자 토의 -> 비평 -> 선별 (0개면 1회 재발산)]
+    [Phase 2: 트랙 맞춤 창의적 양자 토의 -> 비평 -> 선별 (0개면 1회 재발산)]
                                 |
                                 v
-   [Phase 2 (트랙 A/B): 평가 하네스 작성 -> 자동 점검 -> 파일럿 -> 사람 확인 -> 잠금]
+   [Phase 3 (트랙 A/B): 평가 하네스 작성 -> 자동 점검 -> 파일럿 -> 사람 확인 -> 잠금]
                                 |
            +--------------------+--------------------+
            | (파일럿 신호 부재)                      | (통과 + 채점 세트 승인 완료)
            v                                         v
-      [조기 종료]                         [Phase 3: 트랙별 본 검증]
+      [조기 종료]                         [Phase 4: 트랙별 본 검증]
                                                      |
              +---------------------------------------+---------------------------------------+
              |                                       |                                       |
@@ -172,7 +172,7 @@ stages:
              +---------------------------------------+---------------------------------------+
                                                      |
                                                      v
-                 [Phase 4: 타 계열 모델 적대적 감사 (5대 태클 및 범위 타당성 검증) -> 보고서]
+                 [Phase 5: 타 계열 모델 적대적 감사 (5대 태클 및 범위 타당성 검증) -> 보고서]
                                                      |
                                                      v
                  [사람이 보고서 확인 -> 커밋 하나로 합쳐 원본의 새 브랜치로 push]
@@ -221,13 +221,13 @@ stages:                           # 단계별 모델 배정 전체 (2.4절 표).
     slots:
       - {provider: claude, model: opus, effort: high, role: repo_scan}
       - {provider: agy, model: neon, effort: high, role: lit_search}
-  phase1_5_ideation: {critics_mode: all, divergers: [...], critics: [...], selector: {...}}
-  phase2_pilot: {builder: {...}}
+  phase2_ideation: {critics_mode: all, divergers: [...], critics: [...], selector: {...}}
+  phase3_pilot: {builder: {...}}
   crash_repair: {...}
-  phase3_track_a: {experimenter: {...}}
-  phase3_track_b: {worker: {...}, unstuck_peer: {...}}
-  phase3_track_c: {prover: {..., after_quota: {...}}, refuter: {..., after_quota: {...}}}
-  phase4_audit: {auditors: [...], reporter: {...}}
+  phase4_track_a: {experimenter: {...}}
+  phase4_track_b: {worker: {...}, unstuck_peer: {...}}
+  phase4_track_c: {prover: {..., after_quota: {...}}, refuter: {..., after_quota: {...}}}
+  phase5_audit: {auditors: [...], reporter: {...}}
 falsification:
   pilot_check: "<파일럿에서 볼 최소 신호>"
 ```
@@ -255,7 +255,7 @@ falsification:
    - 중복 제안 방지 목록(`Known Approaches`): 학계에 이미 보고된 통상적 변형을 정리해 다음 단계에서 새 아이디어로 중복 제안하지 못하게 막는 필터로 넘긴다.
    - 출처를 직접 확인하지 못한 항목은 "미확인"으로 표시하고, 기억에 기댄 인용은 만들지 않는다.
 
-### Phase 1.5: 트랙 맞춤형 창의적 양자 토의 및 자율 선별 (`01b_ideation/`)
+### Phase 2: 트랙 맞춤형 창의적 양자 토의 및 자율 선별 (`02_ideation/`)
 
 지정된 트랙(A, B, C)에서 집중해야 할 목표에 맞춰 `divergers` 배열의 모델들이 독립적으로 아이디어를 발산하고, 별도의 비평 세션과 선별 세션이 검증해 실행 후보를 스스로 확정한다.
 
@@ -264,9 +264,9 @@ falsification:
    - 문제의 수학적 구조만 추상화한 뒤 타 분야(통계물리, 신호처리, 압축 센싱, 제어이론, 텐서 네트워크 등)의 방법론을 구조적으로 이식하거나 비전형적이더라도 작동 가능한 새 접근을 탐색한다.
    - 트랙 C에서 명세의 질문이 특정 정리를 다루면 그 정리 자체를 첫 후보로 두기를 권장한다(강제하지 않음). 빼거나 뒤로 미루면 이유를 적는다. 발산 원칙(뻔한 변형 배제) 때문에 질문의 정리가 더 새로운 변형으로 바뀌는 일이 있었다(2026-11-19 장난감 실행).
    - 양자 개연성 검증(트랙 A만): 당장 고전 SoTA를 압도하는 이득까지는 요구하지 않더라도, 연산자 대수나 상태 공간 특성상 양자 접근(QML, 양자 커널, 양자 회로 구조)을 도입할 최소한의 물리적, 수학적 개연성이 있는지 따진다. 트랙 C의 후보는 증명할 정리(진술, 가정, 의미)다.
-2. 비평과 선별(`critics` -> `selector`): `critics`가 후보마다 개연성(트랙 A는 양자 접근의 근거, B는 개선 근거와 정확도 유지, C는 정리의 개연성과 의미), SoTA 대비 차별성, 실패 위험을 비평한다(`critics_mode: "all"`은 모든 비평자가 전 후보를, `"shard"`는 후보를 나눠 맡는다). `selector`가 이를 종합해 `01b_selected.json`을 확정한다. 통과 후보는 유망한 순서(가장 유망한 것이 첫째)로 적고, 후보마다 그 자리의 근거(`rank_reason`)를 한 줄로 붙인다(`critics: []`면 비평 없이 바로 선별). 통과 후보가 0개면 탈락 사유를 넣어 발산을 1회만 다시 하고, 그래도 없으면 멈추고 Slack으로 보고한다.
+2. 비평과 선별(`critics` -> `selector`): `critics`가 후보마다 개연성(트랙 A는 양자 접근의 근거, B는 개선 근거와 정확도 유지, C는 정리의 개연성과 의미), SoTA 대비 차별성, 실패 위험을 비평한다(`critics_mode: "all"`은 모든 비평자가 전 후보를, `"shard"`는 후보를 나눠 맡는다). `selector`가 이를 종합해 `02_selected.json`을 확정한다. 통과 후보는 유망한 순서(가장 유망한 것이 첫째)로 적고, 후보마다 그 자리의 근거(`rank_reason`)를 한 줄로 붙인다(`critics: []`면 비평 없이 바로 선별). 통과 후보가 0개면 탈락 사유를 넣어 발산을 1회만 다시 하고, 그래도 없으면 멈추고 Slack으로 보고한다.
 
-### Phase 2: 파일럿 테스트 및 평가 하네스 동결 (트랙 A/B, `02_pilot/`, `evaluation/`)
+### Phase 3: 파일럿 테스트 및 평가 하네스 동결 (트랙 A/B, `03_pilot/`, `evaluation/`)
 
 1. 평가 하네스 (`research_runs/<run_id>/evaluation/`, builder 에이전트가 작성):
    - `prepare.py`: 고정 입력, 분할, 테스트 인스턴스를 `evaluation/inputs/main/`에 만들고, 기준 정답(레이블, 기대 출력 등 채점에만 쓰는 값)은 환경변수 `AR_HIDDEN_DIR`이 가리키는 폴더의 `main/`에만 쓴다. 트랙 A는 구간 탐색에 쓸 입력 변형(표본 수, 노이즈 수준, 문제 크기 등)을 이때 미리 정해 regime마다 `inputs/<regime>/`과 정답 `<regime>/`을 만든다. 본 실험에서 채점되는 regime은 여기서 만든 것뿐이다. 기존 저장소에 검증된 로더가 있으면 감싸 쓴다.
@@ -274,21 +274,21 @@ falsification:
    - `metrics.py`: **50줄 이내 순수 채점 함수**. `python metrics.py <result_dir> [regime]`로 실행되어(regime을 생략하면 main) 결과 파일과 기준만 읽고 `guard` 통과 여부와 `metric`을 계산해 stdout 마지막 줄에 JSON을 낸다(4.2절). 모델 초기화, 학습, 알고리즘 실행은 하지 않는다. 평가 파일(`prepare.py`, `metrics.py`, `test_gate.py`, `run_bench.sh`)에는 코드 블록마다 무엇을 하는지 한 줄 주석을 달아, 파일럿 관문에서 주석만 읽어도 무엇을 채점하는지 알 수 있게 한다. 50줄에는 주석과 빈 줄을 세지 않는다.
    - `test_gate.py`: 소규모 정답 통과, 의도적 불량 입력 기각, SoTA 기준선 재현의 3단계를 검사하고 종료 코드로 알린다.
    - 트랙 B는 `run_bench.sh <result_dir>`도 만든다. 작은 규모의 정확도(Guard) 세트와 중대규모의 속도·메모리(Metric) 세트를 차례로 돌리는 고정 측정기다. 이 파일도 잠기므로 이후에는 소스 코드만 바뀐다. 워밍업은 측정 입력과 다른 입력으로 하고 측정 입력으로는 한 번만 부른다. 같은 프로세스에서 같은 입력을 두 번 불러 두 번째 시간을 재면, 입력별 결과를 저장해 두는 캐시가 가짜 속도 향상으로 측정되기 때문이다(2026-11-19 장난감 실행에서 builder가 이렇게 짰다).
-   - 트랙 A는 선별 후보와 SoTA 기준선마다 `02_pilot/<id>/run.sh <result_dir>`를 만든다.
-   - 트랙 C(순수 수식 증명)는 채점 세트를 두지 않고 Phase 3의 반례 탐색 스크립트로 대체한다.
+   - 트랙 A는 선별 후보와 SoTA 기준선마다 `03_pilot/<id>/run.sh <result_dir>`를 만든다.
+   - 트랙 C(순수 수식 증명)는 채점 세트를 두지 않고 Phase 4의 반례 탐색 스크립트로 대체한다.
 2. 실험은 제어기가 돌린다: 에이전트는 코드와 실행 스크립트만 만들고, 제어기가 `build_cmd` → 실행 스크립트(`timing_rule: second_pass`면 두 번) → `metrics.py`를 돌린다. 실행 자체가 비정상 종료(`crash`)하면 가설 실패(`discard`)로 버리지 않고, `max_crash_repairs`(기본 3회) 안에서 수리 에이전트가 실행 오류만 고친 뒤 다시 돈다(잠긴 파일 수정은 불가).
 3. 자동 점검: 제어기가 정답 폴더를 비우고 `prepare.py`로 정답을 새로 만든 뒤 `test_gate.py`를 실행한다. 실패하면 같은 횟수 안에서 수리한다.
-4. 최소 규모 파일럿: 트랙 A는 후보와 기준선의 `run.sh`를 돌린다. 트랙 B는 현재 코드로 `run_bench.sh`를 한 번 측정한다(최적화 후보는 Phase 3 루프에서 시도한다). 트랙 A는 선별 후보 중 guard를 통과한 것이 하나도 없으면(기준선은 세지 않는다), 트랙 B는 현재 코드가 guard를 통과하지 못하면 조기 종료하고 Slack으로 보고한다. guard는 결과의 형식과 정상 여부만 본다. 후보가 기준선보다 나은지(`pilot_check`)는 제어기가 판정하지 않고 파일럿 관문에서 사람이 본다.
+4. 최소 규모 파일럿: 트랙 A는 후보와 기준선의 `run.sh`를 돌린다. 트랙 B는 현재 코드로 `run_bench.sh`를 한 번 측정한다(최적화 후보는 Phase 4 루프에서 시도한다). 트랙 A는 선별 후보 중 guard를 통과한 것이 하나도 없으면(기준선은 세지 않는다), 트랙 B는 현재 코드가 guard를 통과하지 못하면 조기 종료하고 Slack으로 보고한다. guard는 결과의 형식과 정상 여부만 본다. 후보가 기준선보다 나은지(`pilot_check`)는 제어기가 판정하지 않고 파일럿 관문에서 사람이 본다.
 5. 본 실험 진입 전 사람 확인 (Slack 알림 + tmux 대기): 파일럿 비교 표, 파일럿 판정 기준, `metrics.py` 전문을 보낸다.
-   - `Enter`(또는 `y`): `evaluation/` 아래 모든 파일과 `split_lock` 파일을 읽기 전용(`chmod 444`)으로 바꾸고 SHA-256(Secure Hash Algorithm 256-bit, 파일 내용이 한 글자라도 바뀌면 값이 달라지는 256비트 무결성 지문) 해시를 `state.json`과 `lock.json`에 적는다. 파일럿 코드를 작업 브랜치에 커밋해 Phase 3의 기준 커밋으로 삼는다.
+   - `Enter`(또는 `y`): `evaluation/` 아래 모든 파일과 `split_lock` 파일을 읽기 전용(`chmod 444`)으로 바꾸고 SHA-256(Secure Hash Algorithm 256-bit, 파일 내용이 한 글자라도 바뀌면 값이 달라지는 256비트 무결성 지문) 해시를 `state.json`과 `lock.json`에 적는다. 파일럿 코드를 작업 브랜치에 커밋해 Phase 4의 기준 커밋으로 삼는다.
    - 한글 수정 지시문: builder 에이전트가 평가 코드를 고치고, 자동 점검과 파일럿을 다시 돌린 뒤 다시 보여 준다.
    - `q`: 종료한다.
    - 입력 처리(모든 관문 공통): 파이썬 `readline`을 켜서 방향키, Home, End, Delete가 키 코드로 들어가지 않고 줄 편집으로 동작한다. 그래도 키 코드(ESC로 시작하는 방향키, Ctrl/Shift+방향키, PgUp/PgDn, F키, Alt+키, 마우스 입력)나 제어 문자가 섞이면 지시로 받지 않고 다시 묻는다. 키 코드를 지우고 받으면 빈 입력이 되어 승인으로 처리될 수 있어서다(2026-11-19 사람이 붙은 테스트에서 아래 방향키 코드 `ESC [ B`가 수정 지시로 들어갔다). 붙여넣기 표시(`ESC[200~`, `ESC[201~`)는 지우고 안의 글을 받으며, 관문에서 `Ctrl-C`는 사용자 멈춤으로 끝나 `--resume`으로 이어 간다. tmux 화면을 위로 올려 보려면 `Ctrl-b` 다음 `[`를 누르고 `q`로 나온다.
    - 잠금은 같은 사용자 권한의 에이전트가 풀 수 있으므로, 실제 방어선은 해시다. 제어기는 채점할 때마다, 그리고 감사 뒤 보고서를 쓰기 전에 해시를 다시 대조하고, 다르면 보상 해킹(Reward Hacking, 채점 코드의 허점을 건드려 점수만 올리는 현상) 가능성으로 보고 멈춘다.
-   - 한계: 에이전트와 제어기가 같은 리눅스 사용자로 돌기 때문에, 에이전트가 실행 폴더를 뒤져 정답 파일을 일부러 읽는 것까지는 막지 못한다(2026-11-19 모의 실행에서 정답 경로를 아는 가짜 에이전트의 복사가 통과함). 정답 숨김은 우연한 접근을 막는 장치이고, 일부러 읽은 흔적은 Phase 4 감사(6번 항목)가 본다. 완전히 막으려면 에이전트를 별도 사용자나 컨테이너에서 돌려야 한다. 결과 파일과 정답 파일이 같은지 비교하는 검사는 쓰지 않는다. 정확히 맞힌 결과(정수 출력, 분류 레이블)도 정답 파일과 같아져 정상 결과를 복사로 판정하기 때문이다.
+   - 한계: 에이전트와 제어기가 같은 리눅스 사용자로 돌기 때문에, 에이전트가 실행 폴더를 뒤져 정답 파일을 일부러 읽는 것까지는 막지 못한다(2026-11-19 모의 실행에서 정답 경로를 아는 가짜 에이전트의 복사가 통과함). 정답 숨김은 우연한 접근을 막는 장치이고, 일부러 읽은 흔적은 Phase 5 감사(6번 항목)가 본다. 완전히 막으려면 에이전트를 별도 사용자나 컨테이너에서 돌려야 한다. 결과 파일과 정답 파일이 같은지 비교하는 검사는 쓰지 않는다. 정확히 맞힌 결과(정수 출력, 분류 레이블)도 정답 파일과 같아져 정상 결과를 복사로 판정하기 때문이다.
    - 모든 단계 상태는 `state.json`에 저장되어 프로세스가 끊겨도 `--resume`으로 같은 지점부터 이어간다.
 
-### Phase 3: 트랙별 본 검증 (`03_main/`)
+### Phase 4: 트랙별 본 검증 (`04_main/`)
 
 모든 단계와 반복 호출은 무상태 세션(Stateless Session, 긴 대화창을 유지하지 않고 매 호출마다 빈 세션을 새로 열어 핵심 요약 파일만 주입하는 방식)으로 실행한다. 소스코드 수정은 잠긴 파일, 원본 데이터, 기존 결과 폴더만 건드리지 않는 조건 아래 클론의 작업 브랜치 안에서 파일 개수 제한 없이 허용한다. 트랙 A와 트랙 B의 모든 시도는 `results.tsv`(4.5절) 단일 표에 한 줄씩 누적하고, 성공한 시도의 DISCOVERY 노트와 실패한 시도의 기각 사유는 `notes.md`에 누적한다.
 
@@ -300,7 +300,7 @@ falsification:
    - 경우별 채점: 시도마다 `run.sh`는 결과 폴더 아래에 경우마다 폴더 `<모델 id>`(main 입력) 또는 `<모델 id>@<regime>`을 만들고, 후보와 기준선을 같은 시도에서 함께 돌린다. 제어기가 경우 폴더마다 잠긴 `metrics.py`로 채점한다. 처음 구현은 후보 하나의 예측만 채점해서, 기준선 비교와 구간 탐색이 에이전트 자신의 코드로 계산됐다(2026-11-19 장난감 실행).
    - 파일럿과 조정: 파일럿 표는 최소 규모 동작 확인이고 성능 순위가 아니다(파일럿 관문 메시지와 표 머리에도 적는다). 후보 순위는 선별 단계가 정하고, 파일럿은 후보를 빼거나 순서를 바꾸지 않는다. 본 실험의 작업 에이전트는 파일럿 성능만으로 후보를 버리지 않고, 후보와 고전 기준선 모두에 비슷한 정도의 조정(하이퍼파라미터, 구조, 학습 길이)을 해 본 뒤 비교한다. 조정한 경우는 이름에 `_tuned`처럼 표시한다.
    - 오차 막대: 제어기가 `run.sh`를 `AR_SEED=0..seeds-1`로 `seeds`번 돌려, 경우마다 평균과 평균의 표준오차(표본 표준편차 / √시드 수)를 시도 폴더의 `comparison.md`와 `results.tsv`(경우마다 한 줄)에 적는다. 모든 경우가 모든 시드에서 guard를 통과해야 채택한다.
-   - 누적 비교표: 채택된 시도의 경우를 제어기가 `03_main/comparison_all.md`에 합친다(같은 경우는 최신 값, 그 값을 낸 시도 번호를 붙임). 작업 에이전트는 이 표를 받고, 이미 채점된 경우는 다시 돌리지 않으며 새로 추가하거나 코드를 바꾼 경우만 돌린다(2026-11-19 장난감 실행에서 둘째 시도가 첫 시도의 24경우를 그대로 다시 돌렸다).
+   - 누적 비교표: 채택된 시도의 경우를 제어기가 `04_main/comparison_all.md`에 합친다(같은 경우는 최신 값, 그 값을 낸 시도 번호를 붙임). 작업 에이전트는 이 표를 받고, 이미 채점된 경우는 다시 돌리지 않으며 새로 추가하거나 코드를 바꾼 경우만 돌린다(2026-11-19 장난감 실행에서 둘째 시도가 첫 시도의 24경우를 그대로 다시 돌렸다).
    - 미리 만든 regime 밖의 데이터로 낸 수치는 채점되지 않는다. 에이전트는 그런 탐색을 `exploratory/`에 두고 "채점 안 됨"이라고 적고, 보고서는 그 수치를 결론의 근거로 쓰지 않는다.
 2. 공정한 고전 대조군 의무 포함(Ablation, 전체 파이프라인에서 양자 모듈만 동급 고전 모듈로 교체해 양자 파트의 순수 기여분을 분리 측정하는 실험): 양자 모델 앞단에 고전 전처리나 특징 추출기가 쓰였다면, 동일한 전처리 뒤에 동급 파라미터 수의 고전 모델(RBF 커널, 소규모 신경망 등)을 붙인 대조군을 함께 실행해 전처리 착시를 제거한다.
 3. 유리한 작동 구간(Regime) 탐색: 단일 평균 점수 외에 표본 수, 노이즈 수준, 문제 크기 및 큐비트 수 변화에 따른 성능 곡선을 기록해 양자 접근이 강점을 보이거나 버티는 구체적 조건 구간을 찾아낸다.
@@ -333,7 +333,7 @@ falsification:
                +----------------------+----------------------+
                | (수치 반례 발견 / 지엽적 가정 회피 적발)     | (반례 0건 + 일반성/밀착도 통과)
                v                                             v
-     [결함 근거 주입 후 다음 라운드에서 재작성]       [Phase 4 적대적 감사로 전달]
+     [결함 근거 주입 후 다음 라운드에서 재작성]       [Phase 5 적대적 감사로 전달]
 ```
 
 트랙 C에서 반드시 통과해야 하는 4대 검증 규칙은 다음과 같다.
@@ -343,14 +343,14 @@ falsification:
 3. 비자명성 심사(`Non-Triviality Check`): 기본 부등식의 단순 한두 줄 변형이나 기존 고전 정리의 단순 표기 치환에 불과한 자명한(Trivial & Obvious) 정리는 수학적으로 참이어도 기각한다.
 4. 경계식 밀착도 확인(`Tightness Check`): 상한선이나 오차 경계를 증명한 경우, 소규모 수치 시뮬레이션의 실제 오차 추세와 증명된 경계식의 스케일링 기울기가 부합하는지 확인해 느슨한 상한선(Vacuous Bound, 부등식은 참이지만 우변이 지나치게 커서 실질적 제약을 주지 못하는 경계식)을 걸러낸다.
 
-라운드마다 반례 탐색 결과와 반박 모델의 판정을 합쳐 `round_N_verdict.json`(4.3절)에 적는다. 네 규칙을 모두 통과하면 그 라운드에서 Phase 4로 간다. 최대 라운드가 끝나도 통과하지 못하면 둘로 나눠 판정한다.
+라운드마다 반례 탐색 결과와 반박 모델의 판정을 합쳐 `round_N_verdict.json`(4.3절)에 적는다. 네 규칙을 모두 통과하면 그 라운드에서 Phase 5로 간다. 최대 라운드가 끝나도 통과하지 못하면 둘로 나눠 판정한다.
 
 - 논리 결함이 남았거나 수치 반례가 1건이라도 있거나 반례 탐색이 돌지 못한 경우(`logic_sound: false`, `counterexamples_found != 0`, `tested_cases == 0`)에는 사람에게 묻지 않고 기각 종료한다.
-- 수식 논리와 수치 반례(0건)는 통과했으나 일반성, 비자명성, 밀착도에서만 반박 모델과 합의되지 않은 경우에는 Phase 4 감사 토큰을 쓰기 전에 일시정지한다. 제어기는 판정, 증명 앞부분, 반박 요지를 Slack으로 보내고, `tmux`에서 `Enter`(Phase 4 감사 진행) 또는 `q`(폐기 종료) 입력을 받는다.
+- 수식 논리와 수치 반례(0건)는 통과했으나 일반성, 비자명성, 밀착도에서만 반박 모델과 합의되지 않은 경우에는 Phase 5 감사 토큰을 쓰기 전에 일시정지한다. 제어기는 판정, 증명 앞부분, 반박 요지를 Slack으로 보내고, `tmux`에서 `Enter`(Phase 5 감사 진행) 또는 `q`(폐기 종료) 입력을 받는다.
 
-### Phase 4: 이종 모델 적대적 감사 및 최종 보고 (`04_critique.md`, `05_report.md`)
+### Phase 5: 이종 모델 적대적 감사 및 최종 보고 (`05_audit.md`, `06_report.md`)
 
-Phase 3 주력 모델과 다른 계열의 모델(제어기가 시작할 때 검사)이 읽기 전용으로 원본 결과 파일(JSON, CSV, TSV, 로그)과 수식만 읽고 아래 항목을 감사한다.
+Phase 4 주력 모델과 다른 계열의 모델(제어기가 시작할 때 검사)이 읽기 전용으로 원본 결과 파일(JSON, CSV, TSV, 로그)과 수식만 읽고 아래 항목을 감사한다.
 
 1. 수식 내 숨은 지수 폭발 항이나 느슨한 상한선 유무, 정리가 지나치게 지엽적이지 않은지 여부
 2. 무한 샷 및 무소음 가정의 한계와 유한 샷, 노이즈 구간에서의 붕괴 여부
@@ -360,7 +360,7 @@ Phase 3 주력 모델과 다른 계열의 모델(제어기가 시작할 때 검�
 6. 결과가 실제 계산이 아니라 정답이나 기준 출력을 읽거나 흉내 내서 나온 흔적 (실험 코드가 평가 폴더 밖 경로나 `AR_HIDDEN_DIR`을 읽는지, 입력을 알아보고 계산을 건너뛰는지, 호출 사이에 결과를 저장해 두었다가 돌려주는지, 측정 스크립트가 그런 캐시에 속을 수 있게 짜였는지)
 7. 결론이나 보고에 쓰인 수치가 제어기가 채점한 결과(`comparison.md`, `results.tsv`, `score.json`)인지, 에이전트가 직접 계산해 채점되지 않은 수치인지
 
-감사 뒤 잠긴 파일의 해시를 다시 대조하고, 보고 모델이 `05_report.md`를 쓴다. 최종 보고서의 모든 수치는 결과 파일을 다시 읽어 정확한 파일 경로, 키(또는 줄 번호), 실행 환경(`env.txt`)을 인용한다.
+감사 뒤 잠긴 파일의 해시를 다시 대조하고, 보고 모델이 `06_report.md`를 쓴다. 최종 보고서의 모든 수치는 결과 파일을 다시 읽어 정확한 파일 경로, 키(또는 줄 번호), 실행 환경(`env.txt`)을 인용한다.
 
 ### 마무리: 보고서 확인과 원본으로 push
 
@@ -376,7 +376,7 @@ Phase 3 주력 모델과 다른 계열의 모델(제어기가 시작할 때 검�
 
 앞 단계 에이전트가 생성하고 뒤 단계 파이썬 제어기가 파싱하는 파일의 키 이름을 아래 5개 규격으로 고정해 파싱 오류를 막는다.
 
-### 4.1 Phase 1.5 최종 선별 규격 (`01b_ideation/01b_selected.json`)
+### 4.1 Phase 2 최종 선별 규격 (`02_ideation/02_selected.json`)
 
 ```json
 {
@@ -417,7 +417,7 @@ Phase 3 주력 모델과 다른 계열의 모델(제어기가 시작할 때 검�
 
 `wall_time_sec`이 없으면 제어기가 잰 실행 시간(second pass)을 넣는다.
 
-### 4.3 트랙 C 라운드별 판정 규격 (`03_main/round_N_verdict.json`)
+### 4.3 트랙 C 라운드별 판정 규격 (`04_main/round_N_verdict.json`)
 
 반례 탐색기의 stdout 마지막 줄(`tested_cases`, `counterexamples_found`, `worst_counterexample`, `tightness_ok`)과 반박 모델 출력의 마지막 줄(`logic_sound`, `scope_realistic`, `non_trivial`, `fatal_flaws`)을 제어기가 합친다.
 
@@ -455,7 +455,7 @@ Phase 3 주력 모델과 다른 계열의 모델(제어기가 시작할 때 검�
 }
 ```
 
-### 4.5 실험 이력 원장 컬럼 규격 (`03_main/results.tsv`)
+### 4.5 실험 이력 원장 컬럼 규격 (`04_main/results.tsv`)
 
 트랙 A와 트랙 B의 모든 시도는 아래 9개 고정 탭 구분 헤더로 기록한다. `iter`는 트랙 문자와 번호(`A3`, `B0`)이고, 트랙 A는 경우마다 한 줄이라 `A3:D1_A`, `A3:BASE_1@noise_0.3`처럼 경우 이름을 붙인다. `commit`은 채택된 시도만 적는다. `primary_metric`은 트랙 A에서 그 경우의 시드 평균, 트랙 B에서 후보 측정의 중앙값이다. `spread`는 트랙 A에서 평균의 표준오차, 트랙 B에서 후보 측정값 범위의 절반이다. `delta_pct`는 좋아진 쪽이 양수다.
 
@@ -465,7 +465,7 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 
 ## 5. 사용자 소통 및 보고서 작성 원칙 (`prompts/_writing_rules.md`)
 
-사람에게 보이는 출력(Phase 0 대화 질문, Slack 알림, `01_recon.md`, `04_critique.md`, `05_report.md`)에는 아래 6대 서술 규칙을 지침으로 넣는다.
+사람에게 보이는 출력(Phase 0 대화 질문, Slack 알림, `01_recon.md`, `05_audit.md`, `06_report.md`)에는 아래 6대 서술 규칙을 지침으로 넣는다.
 
 1. **원리 중심의 평문 설명 우선 (수식 및 숫자 나열 금지)**:
    수식을 그대로 베껴 늘어놓거나 측정한 숫자만 나열해 설명을 때우지 않는다. 해당 알고리즘이나 물리적 메커니즘이 실제로 무엇을 어떻게 처리해서 왜 그런 결과가 나왔는지 사람이 읽고 바로 이해할 수 있는 자연스러운 한국어 문장으로 먼저 풀어 쓴다. 수식과 수치는 그 의미를 설명한 뒤 꼭 필요한 핵심 근거만 출처 파일 경로와 함께 정돈해 붙인다.
@@ -515,12 +515,12 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
     └── research_runs/<run_id>/          # 산출물 (git에서 숨김)
         ├── 00_spec.md  providers.yaml  env.txt  lock.json
         ├── 01_recon.md  01_recon/       # Phase 1
-        ├── 01b_ideation/                # Phase 1.5: diverger_*.md, critic_*.md, selector.md, 01b_selected.json
+        ├── 02_ideation/                # Phase 2: diverger_*.md, critic_*.md, selector.md, 02_selected.json
         ├── evaluation/                  # 잠긴 prepare.py, 50줄 metrics.py, test_gate.py, (B) run_bench.sh
-        ├── 02_pilot/                    # Phase 2: 후보별 run.sh, result/, score.json, pilot_table.md
-        ├── 03_main/                     # Phase 3: results.tsv, notes.md, 시도·라운드 폴더, round_N_verdict.json
-        ├── 04_critique.md  04_critique/ # Phase 4 감사
-        └── 05_report.md                 # 최종 보고서
+        ├── 03_pilot/                    # Phase 3: 후보별 run.sh, result/, score.json, pilot_table.md
+        ├── 04_main/                     # Phase 4: results.tsv, notes.md, 시도·라운드 폴더, round_N_verdict.json
+        ├── 05_audit.md  05_audit/      # Phase 5 감사
+        └── 06_report.md                 # 최종 보고서
 ```
 
 ## 7. 실제 사용 흐름 요약 (원격 서버 기준)
@@ -533,7 +533,7 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 
 ## 8. 구현 상태 (2026-11-19)
 
-- 완료: 1단계(`00_spec.md` 템플릿과 `/research-spec` 명령), 2단계(서버 CLI 실측 기반 `providers.yaml`, `llm_router.py`, `notify.py`), 3단계(Phase 1, 1.5, 2와 `state.json` 체크포인트), 4단계(트랙 A/B/C 실행기, Phase 4 감사, push 관문)의 뼈대.
+- 완료: 1단계(`00_spec.md` 템플릿과 `/research-spec` 명령), 2단계(서버 CLI 실측 기반 `providers.yaml`, `llm_router.py`, `notify.py`), 3단계(Phase 1, 2, 3과 `state.json` 체크포인트), 4단계(트랙 A/B/C 실행기, Phase 5 감사, push 관문)의 뼈대.
 - 확인한 것: 8개 모델 ID의 `reply ok` 응답, agy의 프롬프트 전달 방식, venv 방식의 우선순위와 보호, 라우터의 상한·대체·승격 계산(모델 호출 없이). 모델 호출을 가짜 응답으로 바꾼 모의 실행으로 트랙 A/B/C, 파일럿 관문, crash 수리, JSON 재요청, 교대 측정, 정답 숨김, push 단계, `--resume`까지 제어 흐름 전체(2026-11-19).
 - 확인하지 않은 것: 읽기 전용 단계에서 도구 승인이 필요해졌을 때의 동작(claude `--permission-mode dontAsk`는 거부할 것으로 보지만 미확인, agy `--sandbox`는 승인을 기다리며 멈출 수도 있음), 파이프라인 전체 실행.
 - 실제 모델 장난감 실행(2026-11-19): 트랙 B(소수 개수 세기 속도 개선)를 세 번 돌렸다. 한 번에 6~7분, 호출 11~13번이었다. 이 실행들에서 드러난 결함(트랙 B가 선별 후보를 무시함, 측정이 캐시에 속을 수 있음, 트랙 B·C에 양자 근거를 요구함)을 고쳤다.

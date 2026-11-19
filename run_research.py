@@ -1,6 +1,6 @@
 # 자율 연구 제어기. tmux 안에서 실행한다.
 #   python ~/autoresearch/run_research.py --spec ~/autoresearch_runs/<프로젝트>/<run_id>/00_spec.md [--resume]
-# 순서: 작업공간 → 1 조사 → 1.5 발상·선별 → 2 파일럿·채점기 승인(트랙 A/B) → 3 트랙 A/B/C → 4 감사·보고 → push 승인
+# 순서: 작업공간 → 1 조사 → 2 아이디어 토론·선별 → 3 파일럿·채점기 승인(트랙 A/B) → 4 트랙 A/B/C → 5 감사·보고 → push 승인
 import argparse
 import fcntl
 import hashlib
@@ -37,8 +37,8 @@ REPO, VENV = RUN / "repo", RUN / "venv"     # 원본 클론(작업 브랜치), �
 OUT = REPO / "research_runs" / RUN_ID       # 산출물. 클론의 .git/info/exclude로 git에서 숨겨 reset·clean을 피한다
 EVAL = OUT / "evaluation"                   # prepare.py, metrics.py, test_gate.py, (트랙 B) run_bench.sh, 공개 입력
 HIDDEN = RUN / "hidden"                     # 평가 정답. 클론 밖에 두고, 제어기가 채점할 때만 AR_HIDDEN_DIR로 경로를 넘긴다
-SELFTEST = OUT / "02_pilot" / "_selftest_hidden"   # builder가 자기 점검에 쓰는 임시 정답 폴더. 호출이 끝나면 지운다
-MAIN = OUT / "03_main"
+SELFTEST = OUT / "03_pilot" / "_selftest_hidden"   # builder가 자기 점검에 쓰는 임시 정답 폴더. 호출이 끝나면 지운다
+MAIN = OUT / "04_main"
 BRANCH = f"autoresearch/{RUN_ID}"
 STATE_PATH = RUN / "state.json"             # 클론 밖에 둔다
 PY = str(VENV / "bin" / "python")
@@ -51,8 +51,8 @@ PROV_PATH = RUN / "providers.yaml" if (RUN / "providers.yaml").exists() else TOO
 PROV = yaml.safe_load(PROV_PATH.read_text())
 TRACKS = CFG["track"] if isinstance(CFG["track"], list) else [t.strip() for t in str(CFG["track"]).split(",")]
 STAGES, BUDGET = CFG.get("stages") or {}, CFG.get("budget") or {}
-NEED = ["phase1_recon", "phase1_5_ideation", "crash_repair", "phase4_audit"] \
-    + (["phase2_pilot"] if {"A", "B"} & set(TRACKS) else []) + [f"phase3_track_{t.lower()}" for t in TRACKS]
+NEED = ["phase1_recon", "phase2_ideation", "crash_repair", "phase5_audit"] \
+    + (["phase3_pilot"] if {"A", "B"} & set(TRACKS) else []) + [f"phase4_track_{t.lower()}" for t in TRACKS]
 NEED_BUDGET = ["max_crash_repairs", "run_limits"] + (["max_iterations"] if {"A", "B"} & set(TRACKS) else []) \
     + (["seeds"] if "A" in TRACKS else []) + (["bench_rounds"] if "B" in TRACKS else []) \
     + (["max_debate_rounds"] if "C" in TRACKS else [])   # 쓰는 트랙에 필요한 항목만 요구한다
@@ -64,12 +64,12 @@ CONTRACT = CFG.get("evaluation_contract") or {}
 DIRECTION = CONTRACT.get("direction", "higher_is_better")
 
 # 작성 모델과 반박·감사 모델은 계열(벤더)이 달라야 한다. 한도 초과로 대체된 뒤까지는 보장하지 않는다.
-MAIN_PROVIDERS = {STAGES[f"phase3_track_{t.lower()}"][r]["provider"]
+MAIN_PROVIDERS = {STAGES[f"phase4_track_{t.lower()}"][r]["provider"]
                   for t, r in (("A", "experimenter"), ("B", "worker"), ("C", "prover")) if t in TRACKS}
-if "C" in TRACKS and STAGES["phase3_track_c"]["prover"]["provider"] == STAGES["phase3_track_c"]["refuter"]["provider"]:
+if "C" in TRACKS and STAGES["phase4_track_c"]["prover"]["provider"] == STAGES["phase4_track_c"]["refuter"]["provider"]:
     raise SystemExit("트랙 C의 prover와 refuter는 다른 벤더여야 합니다")
-if MAIN_PROVIDERS & {a["provider"] for a in STAGES["phase4_audit"]["auditors"]}:
-    raise SystemExit(f"Phase 4 감사자에 본 실험 벤더({', '.join(MAIN_PROVIDERS)})가 들어 있습니다")
+if MAIN_PROVIDERS & {a["provider"] for a in STAGES["phase5_audit"]["auditors"]}:
+    raise SystemExit(f"Phase 5 감사자에 본 실험 벤더({', '.join(MAIN_PROVIDERS)})가 들어 있습니다")
 SPLIT_LOCK = (CFG.get("constraints") or {}).get("split_lock") or []
 SPLIT_LOCK = [SPLIT_LOCK] if isinstance(SPLIT_LOCK, str) else SPLIT_LOCK
 SECOND_PASS = (CFG.get("constraints") or {}).get("timing_rule") == "second_pass"
@@ -453,35 +453,35 @@ def phase_recon():
         f"# {s['role']} ({s['provider']}/{s['model']}/{s['effort']})\n\n{t}" for s, t in zip(slots, texts)))
 
 
-# ---- Phase 1.5: 발산 → 비평 → 선별. 통과 후보가 없으면 탈락 사유를 넣어 한 번만 다시 발산
+# ---- Phase 2: 발산 → 비평 → 선별. 통과 후보가 없으면 탈락 사유를 넣어 한 번만 다시 발산
 def phase_ideation():
-    st, recon, d = STAGES["phase1_5_ideation"], read(OUT / "01_recon.md"), OUT / "01b_ideation"
+    st, recon, d = STAGES["phase2_ideation"], read(OUT / "01_recon.md"), OUT / "02_ideation"
     feedback = "없음"
     for attempt in (1, 2):
         sfx = "" if attempt == 1 else "_retry"
-        dtexts = parallel([(s, prompt("phase1_5_diverge.md", n=i, track=",".join(TRACKS), lens=s.get("lens", "자유"),
+        dtexts = parallel([(s, prompt("phase2_diverge.md", n=i, track=",".join(TRACKS), lens=s.get("lens", "자유"),
                                       spec=SPEC_TEXT, recon=recon, feedback=feedback),
                             d / f"diverger_{i:02d}{sfx}.md", "readonly", False)
                            for i, s in enumerate(st["divergers"], 1)])
         ideas = [f"## diverger_{i:02d}\n{t}" for i, t in enumerate(dtexts, 1)]
         crit = st.get("critics") or []
         shard = st.get("critics_mode", "all") == "shard"
-        ctexts = parallel([(s, prompt("phase1_5_critic.md", spec=SPEC_TEXT, recon=recon,
+        ctexts = parallel([(s, prompt("phase2_critic.md", spec=SPEC_TEXT, recon=recon,
                                       ideas="\n\n".join(ideas[i::len(crit)] if shard else ideas)),
                             d / f"critic_{i + 1:02d}{sfx}.md", "readonly", False)
                            for i, s in enumerate(crit)]) if crit else []
         _, sel = agent_json("selector", st["selector"], prompt(
-            "phase1_5_select.md", spec=SPEC_TEXT, recon=recon, ideas="\n\n".join(ideas),
+            "phase2_select.md", spec=SPEC_TEXT, recon=recon, ideas="\n\n".join(ideas),
             critiques="\n\n".join(f"## critic_{i:02d}\n{t}" for i, t in enumerate(ctexts, 1)) or "비평 없음"),
             d / f"selector{sfx}.md", "readonly", parse_selection, SELECT_SCHEMA)
-        (d / "01b_selected.json").write_text(json.dumps(sel, ensure_ascii=False, indent=2))
+        (d / "02_selected.json").write_text(json.dumps(sel, ensure_ascii=False, indent=2))
         if sel.get("selected_candidates"):
             return
         feedback = json.dumps(sel.get("dropped_candidates", []), ensure_ascii=False)
     raise Stop("통과 후보 0개 (다시 발산한 뒤에도)")
 
 
-# ---- Phase 2: 평가 하네스 작성 → 자동 점검 → 파일럿 (트랙 A/B)
+# ---- Phase 3: 평가 하네스 작성 → 자동 점검 → 파일럿 (트랙 A/B)
 def harness_check():
     for attempt in range(BUDGET["max_crash_repairs"] + 1):
         shutil.rmtree(HIDDEN, ignore_errors=True)       # 정답은 매번 prepare.py로 새로 만든다
@@ -489,19 +489,19 @@ def harness_check():
         r1 = sh([PY, str(EVAL / "prepare.py")], cwd=EVAL, check=False, env=SCORE_ENV)
         r2 = sh([PY, str(EVAL / "test_gate.py")], cwd=EVAL, check=False, env=SCORE_ENV) if r1.returncode == 0 else r1
         log = f"[prepare.py rc={r1.returncode}]\n{r1.stdout}{r1.stderr}\n[test_gate.py rc={r2.returncode}]\n{r2.stdout}{r2.stderr}"
-        (OUT / "02_pilot" / "test_gate.log").write_text(log)
+        (OUT / "03_pilot" / "test_gate.log").write_text(log)
         if r1.returncode == 0 and r2.returncode == 0:
             return
         if attempt < BUDGET["max_crash_repairs"]:
-            repair(OUT / "02_pilot", f"cd {EVAL} && python prepare.py && python test_gate.py", log, attempt + 1)
+            repair(OUT / "03_pilot", f"cd {EVAL} && python prepare.py && python test_gate.py", log, attempt + 1)
     raise RuntimeError("prepare.py 또는 test_gate.py 3단계 점검을 통과하지 못함")
 
 
 def pilot_runs():
-    pilot = OUT / "02_pilot"
+    pilot = OUT / "03_pilot"
     if "A" in TRACKS:
         cases = {p.name: p / "run.sh" for p in sorted(pilot.iterdir()) if (p / "run.sh").exists()}
-    else:  # ponytail: 트랙 B 파일럿은 현재 코드 측정만. 최적화 후보는 Phase 3 루프에서 시도한다
+    else:  # ponytail: 트랙 B 파일럿은 현재 코드 측정만. 최적화 후보는 Phase 4 루프에서 시도한다
         cases = {"current_code": EVAL / "run_bench.sh"}
     rows = {name: run_case(pilot / name, script) for name, script in cases.items()}
     table = "파일럿: 최소 규모 동작 확인 (성능 순위가 아님)\n\n" \
@@ -513,15 +513,15 @@ def pilot_runs():
 
 
 def phase_pilot():
-    agent("builder", STAGES["phase2_pilot"]["builder"], prompt(
-        "phase2_build.md", track=",".join(TRACKS), spec=SPEC_TEXT, recon=read(OUT / "01_recon.md"),
-        selected=read(OUT / "01b_ideation" / "01b_selected.json"), eval_dir=EVAL, pilot_dir=OUT / "02_pilot"),
-        OUT / "02_pilot" / "builder.md", "full", env=BUILD_ENV)
+    agent("builder", STAGES["phase3_pilot"]["builder"], prompt(
+        "phase3_build.md", track=",".join(TRACKS), spec=SPEC_TEXT, recon=read(OUT / "01_recon.md"),
+        selected=read(OUT / "02_ideation" / "02_selected.json"), eval_dir=EVAL, pilot_dir=OUT / "03_pilot"),
+        OUT / "03_pilot" / "builder.md", "full", env=BUILD_ENV)
     shutil.rmtree(SELFTEST, ignore_errors=True)         # 자기 점검용 정답은 남기지 않는다
     harness_check()
     rows, table = pilot_runs()
     if "A" in TRACKS:   # 트랙 A는 선별 후보 중 하나 이상이 guard를 통과해야 한다. 기준선은 세지 않는다
-        base_ids = {b.get("id") for b in json.loads(read(OUT / "01b_ideation" / "01b_selected.json", "{}"))
+        base_ids = {b.get("id") for b in json.loads(read(OUT / "02_ideation" / "02_selected.json", "{}"))
                     .get("sota_baselines") or []}
         ok, why = any(v.get("guard_pass") for k, v in rows.items() if k not in base_ids), \
             "선별 후보 중 guard를 통과한 것이 없음 (기준선은 세지 않음)"
@@ -535,29 +535,29 @@ def phase_gate_pilot():
     while True:
         say(f"[{RUN_ID}] 파일럿 완료. 채점기 확인이 필요합니다.\n"
             f"파일럿은 채점 코드와 후보가 돌아가는지 보는 최소 규모 실행입니다. 후보를 빼거나 순위를 바꾸지 않습니다.\n\n"
-            f"{read(OUT / '02_pilot' / 'pilot_table.md')}\n"
+            f"{read(OUT / '03_pilot' / 'pilot_table.md')}\n"
             f"파일럿 판정 기준: {(CFG.get('falsification') or {}).get('pilot_check', '-')}\n\n"
             f"metrics.py\n```\n{read(EVAL / 'metrics.py')}\n```")
         a = ask("Enter 또는 y: 잠그고 본 실험 | q: 종료 | 그 밖의 글: 평가 코드 수정 지시 > ")
         if a.lower() in ("", "y"):
             lock_eval()
-            git("add", "-A")                             # 파일럿 코드를 기준 커밋으로 (Phase 3의 reset·clean이 지우지 않게)
+            git("add", "-A")                             # 파일럿 코드를 기준 커밋으로 (Phase 4의 reset·clean이 지우지 않게)
             git("commit", "--allow-empty", "-q", "-m", "pilot: 평가 하네스 승인 시점")
             STATE["best_commit"] = git("rev-parse", "HEAD")
             save_state()
             return
         if a.lower() == "q":
             raise Stop("사용자가 파일럿 확인 단계에서 종료", by_user=True)
-        agent("builder", STAGES["phase2_pilot"]["builder"], prompt("phase2_fix.md", instruction=a, eval_dir=EVAL),
-              OUT / "02_pilot" / f"fix_{time.strftime('%H%M%S')}.md", "full", env=BUILD_ENV)
+        agent("builder", STAGES["phase3_pilot"]["builder"], prompt("phase3_fix.md", instruction=a, eval_dir=EVAL),
+              OUT / "03_pilot" / f"fix_{time.strftime('%H%M%S')}.md", "full", env=BUILD_ENV)
         shutil.rmtree(SELFTEST, ignore_errors=True)
         harness_check()
         pilot_runs()
 
 
-# ---- Phase 3 트랙 A/B: 시도 1회 = 에이전트 수정 → 제어기 실행·채점 → 채택(commit) 또는 원복(reset)
+# ---- Phase 4 트랙 A/B: 시도 1회 = 에이전트 수정 → 제어기 실행·채점 → 채택(commit) 또는 원복(reset)
 def phase_track_ab(track):
-    st = STAGES[f"phase3_track_{track.lower()}"]
+    st = STAGES[f"phase4_track_{track.lower()}"]
     role = "experimenter" if track == "A" else "worker"
     tsv, notes = MAIN / "results.tsv", MAIN / "notes.md"
     MAIN.mkdir(parents=True, exist_ok=True)
@@ -583,7 +583,7 @@ def phase_track_ab(track):
         save_state()
 
     # 트랙 B는 선별 후보를 유망한 순서(selector가 정한 순서)대로 시도마다 하나씩 배정한다
-    cands = (json.loads(read(OUT / "01b_ideation" / "01b_selected.json", "{}")).get("selected_candidates") or []) \
+    cands = (json.loads(read(OUT / "02_ideation" / "02_selected.json", "{}")).get("selected_candidates") or []) \
         if track == "B" else []
     if len(cands) > BUDGET["max_iterations"] and not T.get("warned"):
         skipped = ", ".join(str(c.get("id", "?")) for c in cands[BUDGET["max_iterations"]:])
@@ -603,7 +603,7 @@ def phase_track_ab(track):
             "없음. 선별 후보는 모두 시도했다. 결과와 노트를 보고 다음 방법을 직접 고른다." 
         text = llm.call(cur, prompt(
             f"track_{track.lower()}.md", iter=it, max_iter=BUDGET["max_iterations"], spec=SPEC_TEXT,
-            selected=read(OUT / "01b_ideation" / "01b_selected.json"), pilot=read(OUT / "02_pilot" / "pilot_table.md"),
+            selected=read(OUT / "02_ideation" / "02_selected.json"), pilot=read(OUT / "03_pilot" / "pilot_table.md"),
             results=tail(tsv), notes=tail(notes, 60), advice=T["advice"], iter_dir=work, eval_dir=EVAL,
             best_commit=STATE["best_commit"], best_metric=T["best_metric"], direction=DIRECTION,
             min_pct=CONTRACT.get("min_improvement_pct", 1.0), build_cmd=CFG.get("build_cmd") or "없음",
@@ -658,7 +658,7 @@ def phase_track_ab(track):
             break
 
 
-# ---- Phase 3 트랙 C: 증명 ↔ 반박·반례 탐색을 라운드로 반복
+# ---- Phase 4 트랙 C: 증명 ↔ 반박·반례 탐색을 라운드로 반복
 def run_hunter(rd):
     script = rd / "counterexample_hunter.py"
     for attempt in range(BUDGET["max_crash_repairs"] + 1):
@@ -674,7 +674,7 @@ def run_hunter(rd):
 
 
 def phase_track_c():
-    st = STAGES["phase3_track_c"]
+    st = STAGES["phase4_track_c"]
     C = STATE.setdefault("track_C", {"round": 0, "verdict": None})
     while C["round"] < BUDGET["max_debate_rounds"]:
         C["round"] += 1
@@ -682,7 +682,7 @@ def phase_track_c():
         save_state()
         rd, prev = MAIN / f"C_round_{n:02d}", MAIN / f"C_round_{n - 1:02d}"
         proof = agent("C_prover", st["prover"], prompt(
-            "track_c_prove.md", n=n, spec=SPEC_TEXT, selected=read(OUT / "01b_ideation" / "01b_selected.json"),
+            "track_c_prove.md", n=n, spec=SPEC_TEXT, selected=read(OUT / "02_ideation" / "02_selected.json"),
             prev_proof=read(prev / "proof.md", "없음 (첫 라운드)"), objections=read(prev / "refute.md", "없음"),
             verdict=json.dumps(C["verdict"], ensure_ascii=False) if C["verdict"] else "없음"),
             rd / "proof.md", "readonly")
@@ -706,27 +706,27 @@ def phase_track_c():
     say(f"[{RUN_ID}] 트랙 C: 논리와 수치 반례 검사는 통과했지만 일반성·비자명성·밀착도에서 이견이 남음.\n"
         f"판정: {json.dumps(v, ensure_ascii=False)}\n\n증명 앞부분:\n{read(last / 'proof.md')[:1500]}\n\n"
         f"반박 요지:\n{read(last / 'refute.md')[-1500:]}")
-    if ask("Enter: Phase 4 감사 진행 | q: 폐기하고 종료 > ").lower() == "q":
+    if ask("Enter: Phase 5 감사 진행 | q: 폐기하고 종료 > ").lower() == "q":
         raise Stop("트랙 C 결과를 사용자가 폐기", by_user=True)
 
 
-# ---- Phase 4: 다른 계열 모델의 감사 → 보고서
+# ---- Phase 5: 다른 계열 모델의 감사 → 보고서
 def phase_audit():
-    st = STAGES["phase4_audit"]
+    st = STAGES["phase5_audit"]
     files = sorted(str(p.relative_to(REPO)) for p in OUT.rglob("*")
                    if p.is_file() and p.suffix in (".json", ".tsv", ".csv", ".log", ".md", ".py", ".sh"))
     verdicts = "\n".join(f"{p.name}: {p.read_text()}" for p in sorted(MAIN.glob("round_*_verdict.json"))) or "없음"
     ctx = dict(spec=SPEC_TEXT, tracks=",".join(TRACKS), files="\n".join(files[:400]), results=tail(MAIN / "results.tsv", 80),
-               verdicts=verdicts, selected=read(OUT / "01b_ideation" / "01b_selected.json"), out_dir=OUT)
-    texts = parallel([(s, prompt("phase4_audit.md", **ctx), OUT / "04_critique" / f"auditor_{i:02d}.md", "readonly", True)
+               verdicts=verdicts, selected=read(OUT / "02_ideation" / "02_selected.json"), out_dir=OUT)
+    texts = parallel([(s, prompt("phase5_audit.md", **ctx), OUT / "05_audit" / f"auditor_{i:02d}.md", "readonly", True)
                       for i, s in enumerate(st["auditors"], 1)])
-    (OUT / "04_critique.md").write_text("\n\n".join(
+    (OUT / "05_audit.md").write_text("\n\n".join(
         f"# auditor_{i:02d} ({s['provider']}/{s['model']}/{s['effort']})\n\n{t}"
         for i, (s, t) in enumerate(zip(st["auditors"], texts), 1)))
     verify_locks()
-    agent("reporter", st["reporter"], prompt("phase4_report.md", **ctx, critique=read(OUT / "04_critique.md"),
+    agent("reporter", st["reporter"], prompt("phase5_report.md", **ctx, critique=read(OUT / "05_audit.md"),
                                              notes=tail(MAIN / "notes.md", 80), env=read(OUT / "env.txt")[:3000]),
-          OUT / "05_report.md", "readonly", human=True)
+          OUT / "06_report.md", "readonly", human=True)
 
 
 # ---- 마지막: 보고서 확인 → 커밋 하나로 합쳐 원본 저장소의 새 브랜치로 가져와 push
@@ -788,9 +788,9 @@ def remote_is_private(remote):
 
 
 def phase_final():
-    rep = read(OUT / "05_report.md")
+    rep = read(OUT / "06_report.md")
     heads = [m.start() for m in re.finditer(r"^## ", rep, re.M)]   # 알림에는 결론 절(첫 절)까지만 보낸다
-    say(f"[{RUN_ID}] 완료\n보고서: {OUT / '05_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}")
+    say(f"[{RUN_ID}] 완료\n보고서: {OUT / '06_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}")
     if ask(f"보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
         raise Stop("push 보류. 나중에 --resume으로 다시 묻습니다", by_user=True)
     final = f"{BRANCH}-final"

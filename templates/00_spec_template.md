@@ -33,7 +33,7 @@ stages:                           # 단계별 모델 배정. 쓰는 트랙의 �
     slots:                        # role마다 prompts/phase1_<role>.md
       - {provider: claude, model: opus, effort: high, role: repo_scan}
       - {provider: agy, model: neon, effort: high, role: lit_search}
-  phase1_5_ideation:
+  phase2_ideation:
     critics_mode: all             # all: 모든 비평자가 전 후보 | shard: 후보를 나눠 맡음
     divergers:                    # 같은 모델을 여러 줄 넣을 때는 lens: "통계물리 관점"처럼 관점을 붙인다
       - {provider: claude, model: fable, effort: high}
@@ -43,21 +43,21 @@ stages:                           # 단계별 모델 배정. 쓰는 트랙의 �
       - {provider: agy, model: neon, effort: high}
       - {provider: codex, model: sol, effort: high}
     selector: {provider: claude, model: opus, effort: xhigh}
-  phase2_pilot:
+  phase3_pilot:
     builder: {provider: claude, model: opus, effort: high}
   crash_repair: {provider: claude, model: opus, effort: high}
-  phase3_track_a:
+  phase4_track_a:
     experimenter: {provider: claude, model: opus, effort: xhigh}
-  phase3_track_b:
+  phase4_track_b:
     worker: {provider: claude, model: opus, effort: high}
     unstuck_peer: {provider: agy, model: neon, effort: xhigh}
-  phase3_track_c:
+  phase4_track_c:
     prover: {provider: claude, model: fable, effort: xhigh,
              after_quota: {provider: claude, model: opus, effort: max}}
     refuter: {provider: codex, model: astra, effort: high,
               after_quota: {provider: agy, model: neon, effort: xhigh}}
-  phase4_audit:
-    auditors:                     # 본 실험(Phase 3) 주력 모델과 다른 벤더만
+  phase5_audit:
+    auditors:                     # 본 실험(Phase 4) 주력 모델과 다른 벤더만
       - {provider: agy, model: neon, effort: high}
       - {provider: codex, model: sol, effort: high}
     reporter: {provider: claude, model: opus, effort: high}

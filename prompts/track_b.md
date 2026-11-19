@@ -3,7 +3,7 @@
 연구 명세 (guard는 깨지면 안 되는 조건, metric은 개선 목표):
 {{spec}}
 
-선별된 후보 (Phase 1.5의 01b_selected.json):
+선별된 후보 (Phase 2의 02_selected.json):
 {{selected}}
 
 현재 최고 커밋: {{best_commit}}

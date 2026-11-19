@@ -9,7 +9,7 @@
 파일럿 표:
 {{pilot}}
 
-지금까지 채점된 경우의 누적 비교표 (경우마다 최신 값, 03_main/comparison_all.md):
+지금까지 채점된 경우의 누적 비교표 (경우마다 최신 값, 04_main/comparison_all.md):
 {{comparison_all}}
 
 지금까지의 results.tsv (끝부분):
