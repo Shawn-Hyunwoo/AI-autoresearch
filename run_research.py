@@ -742,14 +742,16 @@ def phase_final():
     (RUN / "final.index").unlink()
     problems = push_gate(final)
     if problems:
-        raise Stop("push 관문에서 걸림 (절대경로·호스트명·토큰 꼴·큰 파일). 클론에서 고친 뒤 --resume\n" + "\n".join(problems[:50]))
+        raise Stop("push 관문에서 걸림 (절대경로·호스트명·토큰 꼴·큰 파일). 클론에서 고친 뒤 --resume\n" + "\n".join(problems[:50]),
+                   by_user=True)   # push 확인 직후라 사람이 화면 앞에 있다. Slack으로 다시 보내지 않는다
     remote = CFG.get("push_remote", "origin")
     ok, why = remote_is_private(remote)
     git("fetch", "-q", str(REPO), f"+{final}:{BRANCH}", cwd=SRC)   # 다시 시도하면 이 도구가 만든 브랜치를 덮어쓴다
     if not ok:
-        raise Stop(f"원본에 브랜치 {BRANCH}는 만들었지만 push하지 않음: {why}\n직접 하려면: git -C {SRC} push {remote} {BRANCH}")
+        raise Stop(f"원본에 브랜치 {BRANCH}는 만들었지만 push하지 않음: {why}\n직접 하려면: git -C {SRC} push {remote} {BRANCH}",
+                   by_user=True)
     git("push", "-q", remote, BRANCH, cwd=SRC)
-    say(f"[{RUN_ID}] push 완료: {remote} {BRANCH}")
+    print(f"[{RUN_ID}] push 완료: {remote} {BRANCH}", flush=True)
 
 
 # ---- 실행
