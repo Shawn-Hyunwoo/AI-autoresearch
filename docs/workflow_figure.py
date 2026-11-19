@@ -1,4 +1,4 @@
-# README workflow figure: python docs/workflow_figure.py -> docs/workflow.svg (needs matplotlib)
+# README workflow figure: python docs/workflow_figure.py -> docs/pipeline.svg (needs matplotlib)
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
@@ -74,4 +74,4 @@ for i, (k, name) in enumerate([("you", "you"), ("agent", "LLM agents"), ("ctrl",
 ax.text(W - PAD, 0.205, "The controller runs and scores every experiment.  Track C goes from 4 to 7.",
         fontsize=8.6, color=GREY, ha="right", va="center")
 
-fig.savefig(Path(__file__).parent / "workflow.svg", facecolor="white")
+fig.savefig(Path(__file__).parent / "pipeline.svg", facecolor="white")
