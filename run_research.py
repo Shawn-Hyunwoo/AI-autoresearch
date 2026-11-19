@@ -176,7 +176,7 @@ def agent(key, default, body, out_file, mode, human=False, env=None):
 
 SELECT_SCHEMA = ('```json\n{"sota_baselines": [{"id": "BASE_1", "name": "...", "kind": "classical|quantum", "source": "..."}],\n'
                  ' "selected_candidates": [{"id": "D1_A", "title": "...", "mechanism": "...", "quantum_rationale": "(트랙 A만)", '
-                 '"pilot_setup": "..."}],\n "dropped_candidates": [{"id": "D2_A", "reason": "..."}]}\n```')
+                 '"pilot_setup": "...", "rank_reason": "..."}],\n "dropped_candidates": [{"id": "D2_A", "reason": "..."}]}\n```')
 VERDICT_SCHEMA = '출력 마지막 줄에 JSON 한 줄: {"logic_sound": true, "scope_realistic": true, "non_trivial": true, "fatal_flaws": []}'
 
 
@@ -518,19 +518,32 @@ def phase_track_ab(track):
         row(0, STATE["best_commit"][:9], "keep", s, None, "수정 전 기준 측정")
         save_state()
 
+    # 트랙 B는 선별 후보를 유망한 순서(selector가 정한 순서)대로 시도마다 하나씩 배정한다
+    cands = (json.loads(read(OUT / "01b_ideation" / "01b_selected.json", "{}")).get("selected_candidates") or []) \
+        if track == "B" else []
+    if len(cands) > BUDGET["max_iterations"] and not T.get("warned"):
+        skipped = ", ".join(str(c.get("id", "?")) for c in cands[BUDGET["max_iterations"]:])
+        say(f"[{RUN_ID}] 경고: 선별 후보 {len(cands)}개에 시도 상한은 {BUDGET['max_iterations']}회입니다.\n"
+            f"유망도가 낮은 후보 {skipped}는 시도하지 못합니다.")
+        T["warned"] = True
+        save_state()
+
     while T["iter"] < BUDGET["max_iterations"]:
         T["iter"] += 1
         it = T["iter"]
         save_state()
         work = MAIN / f"{track}_iter_{it:02d}"
         cur = slot(f"{track}_{role}", st[role])
+        cand = cands[it - 1] if it <= len(cands) else None
+        assigned = json.dumps(cand, ensure_ascii=False, indent=1) if cand else \
+            "없음. 선별 후보는 모두 시도했다. 결과와 노트를 보고 다음 방법을 직접 고른다." 
         text = llm.call(cur, prompt(
             f"track_{track.lower()}.md", iter=it, max_iter=BUDGET["max_iterations"], spec=SPEC_TEXT,
             selected=read(OUT / "01b_ideation" / "01b_selected.json"), pilot=read(OUT / "02_pilot" / "pilot_table.md"),
             results=tail(tsv), notes=tail(notes, 60), advice=T["advice"], iter_dir=work, eval_dir=EVAL,
             best_commit=STATE["best_commit"], best_metric=T["best_metric"], direction=DIRECTION,
             min_pct=CONTRACT.get("min_improvement_pct", 1.0), build_cmd=CFG.get("build_cmd") or "없음",
-            seeds=BUDGET.get("seeds"), rounds=BUDGET.get("bench_rounds")),
+            seeds=BUDGET.get("seeds"), rounds=BUDGET.get("bench_rounds"), assigned=assigned),
             work / "agent.md", mode="full", cwd=REPO, env=ENV)
         if track == "A":
             s = attempt_a(work)
@@ -541,7 +554,7 @@ def phase_track_ab(track):
             delta = s.get("delta_pct")
             keep = bool(s.get("guard_pass")) and delta is not None and delta >= CONTRACT.get("min_improvement_pct", 1.0)
         disc = [ln.split(":", 1)[1].strip() for ln in text.splitlines() if ln.startswith("DISCOVERY:")][:3]
-        summary = "; ".join(disc) or s.get("guard_reason", "")
+        summary = (f"[{cand.get('id')}] " if cand else "") + ("; ".join(disc) or s.get("guard_reason", ""))
         if keep:
             if track == "A":
                 git("add", "-A")
@@ -568,7 +581,7 @@ def phase_track_ab(track):
                     best_commit=STATE["best_commit"]), work / "unstuck.md", "readonly")
             T["stale"] = 0
         save_state()
-        if re.search(r"^NEXT:\s*done", text, re.M | re.I):
+        if re.search(r"^NEXT:\s*done", text, re.M | re.I) and it >= len(cands):   # 후보가 남아 있으면 done을 무시
             break
 
 
