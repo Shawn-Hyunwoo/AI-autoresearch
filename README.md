@@ -8,7 +8,7 @@
 
 ### 무엇인가
 
-연구 질문 하나를 받아 여러 언어 모델(Claude, Gemini 계열 `agy`, Codex)이 선행연구 조사, 아이디어 토론(제안하는 모델과 비평하는 모델이 1:1로 여러 회차 주고받음), 파일럿, 본 실험이나 증명, 교차 감사, 보고서 작성까지 이어서 하는 자율 연구 도구입니다. 사람은 처음에 명세를 정하고, 중간의 몇 군데 관문에서 확인만 합니다. 설계 전체는 [docs/design_ko.md](docs/design_ko.md)에 있습니다.
+연구 질문 하나를 받아 여러 언어 모델(Claude, Gemini 계열 `agy`, Codex)이 선행연구 조사(트랙 A·C는 세 벤더가 따로 조사한 뒤 합치고 인용을 직접 확인), 아이디어 토론(제안하는 모델과 비평하는 모델이 1:1로 여러 회차 주고받음), 파일럿, 본 실험이나 증명, 교차 감사, 보고서 작성까지 이어서 하는 자율 연구 도구입니다. 사람은 처음에 명세를 정하고, 중간의 몇 군데 관문에서 확인만 합니다. 설계 전체는 [docs/design_ko.md](docs/design_ko.md)에 있습니다.
 
 연구 목적에 따라 세 갈래(트랙)로 나뉩니다.
 - 트랙 A: 새 양자 모델이나 방법이 실제로 쓸모 있는지 기준선과 비교해 보인다.
@@ -17,7 +17,7 @@
 
 ### 어떻게 돌아가나
 
-![workflow](docs/pipeline_v3.svg)
+![workflow](docs/pipeline_v4.svg)
 
 원칙은 다섯 가지입니다.
 - 원본 저장소의 브랜치는 건드리지 않습니다. 실행마다 클론을 만들고 그 안에서만 작업합니다. 원본에는 마지막에 사람이 승인할 때 새 브랜치 하나만 생깁니다.
@@ -127,7 +127,7 @@ MIT 라이선스입니다. 저작권 표시만 유지하면 누구나 쓰고, �
 
 ### What it is
 
-A tool for autonomous research. Given one research question, several language models (Claude, the Gemini-based `agy`, and Codex) carry it through a literature and repository survey, idea debates (each proposing model argues with one critic over several rounds), a pilot, the main experiment or proof, a cross-vendor audit, and a final report. A person writes the spec at the start and only confirms at a few checkpoints. The full design (in Korean) is in [docs/design_ko.md](docs/design_ko.md).
+A tool for autonomous research. Given one research question, several language models (Claude, the Gemini-based `agy`, and Codex) carry it through a literature and repository survey (for tracks A and C, three vendors search separately and every cited arXiv ID and DOI is looked up), idea debates (each proposing model argues with one critic over several rounds), a pilot, the main experiment or proof, a cross-vendor audit, and a final report. A person writes the spec at the start and only confirms at a few checkpoints. The full design (in Korean) is in [docs/design_ko.md](docs/design_ko.md).
 
 There are three tracks:
 - Track A: show that a new quantum model or method is actually useful, against baselines.
@@ -136,7 +136,7 @@ There are three tracks:
 
 ### How it works
 
-![workflow](docs/pipeline_v3.svg)
+![workflow](docs/pipeline_v4.svg)
 
 Five rules:
 - The original repository's branches are never touched. Each run works inside its own clone. The original only gets one new branch at the end, after you approve.

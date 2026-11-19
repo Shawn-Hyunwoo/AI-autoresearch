@@ -1,4 +1,4 @@
-# README workflow figure: python docs/workflow_figure.py -> docs/pipeline_v3.svg (needs matplotlib)
+# README workflow figure: python docs/workflow_figure.py -> docs/pipeline_v4.svg (needs matplotlib)
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
@@ -18,7 +18,7 @@ KIND = {  # fill, edge, title colour
 STEPS = [  # (kind, title, body)
     ("you", "Spec", "/research-spec\nagree on 00_spec.md"),
     ("ctrl", "Setup", "clone without remote,\nper-run venv"),
-    ("agent", "Recon", "repo scan +\nliterature search"),
+    ("agent", "Recon", "repo scan + literature\nsearch, cross-checked"),
     ("agent", "Ideation", "1:1 debates, up to\nN rounds → rank"),
     ("agent", "Pilot", "write scoring code,\nlock it, smoke run"),
     ("you", "Gate", "you check the\nscoring code"),
@@ -74,4 +74,4 @@ for i, (k, name) in enumerate([("you", "you"), ("agent", "LLM agents"), ("ctrl",
 ax.text(W - PAD, 0.205, "The controller runs and scores every experiment.  Track C goes from 4 to 7.",
         fontsize=8.6, color=GREY, ha="right", va="center")
 
-fig.savefig(Path(__file__).parent / "pipeline_v3.svg", facecolor="white")
+fig.savefig(Path(__file__).parent / "pipeline_v4.svg", facecolor="white")
