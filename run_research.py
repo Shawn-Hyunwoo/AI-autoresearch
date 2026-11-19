@@ -104,8 +104,11 @@ llm.setup(PROV, LIMITS, STATE, save_state, {
 
 # ---- 공통 도구
 class Stop(Exception):
-    # 오류가 아닌 멈춤: 사람의 q, 파일럿 신호 없음, 트랙 C 기각, push 보류
-    pass
+    # 오류가 아닌 멈춤: 파일럿 신호 없음, 트랙 C 기각, push 관문 등.
+    # by_user=True는 사람이 tmux에서 직접 고른 멈춤(q, push 거절)이라 Slack으로 다시 알리지 않는다
+    def __init__(self, msg, by_user=False):
+        super().__init__(msg)
+        self.by_user = by_user
 
 
 def say(msg):
@@ -483,7 +486,7 @@ def phase_gate_pilot():
             save_state()
             return
         if a.lower() == "q":
-            raise Stop("사용자가 파일럿 확인 단계에서 종료")
+            raise Stop("사용자가 파일럿 확인 단계에서 종료", by_user=True)
         agent("builder", STAGES["phase2_pilot"]["builder"], prompt("phase2_fix.md", instruction=a, eval_dir=EVAL),
               OUT / "02_pilot" / f"fix_{time.strftime('%H%M%S')}.md", "full", env=BUILD_ENV)
         shutil.rmtree(SELFTEST, ignore_errors=True)
@@ -634,7 +637,7 @@ def phase_track_c():
         f"판정: {json.dumps(v, ensure_ascii=False)}\n\n증명 앞부분:\n{read(last / 'proof.md')[:1500]}\n\n"
         f"반박 요지:\n{read(last / 'refute.md')[-1500:]}")
     if ask("Enter: Phase 4 감사 진행 | q: 폐기하고 종료 > ").lower() == "q":
-        raise Stop("트랙 C 결과를 사용자가 폐기")
+        raise Stop("트랙 C 결과를 사용자가 폐기", by_user=True)
 
 
 # ---- Phase 4: 다른 계열 모델의 감사 → 보고서
@@ -719,7 +722,7 @@ def phase_final():
     heads = [m.start() for m in re.finditer(r"^## ", rep, re.M)]   # 알림에는 결론 절(첫 절)까지만 보낸다
     say(f"[{RUN_ID}] 완료\n보고서: {OUT / '05_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}")
     if ask(f"보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
-        raise Stop("push 보류. 나중에 --resume으로 다시 묻습니다")
+        raise Stop("push 보류. 나중에 --resume으로 다시 묻습니다", by_user=True)
     final = f"{BRANCH}-final"
     git("checkout", "-q", BRANCH)
     git("reset", "--hard", STATE["best_commit"])
@@ -771,7 +774,7 @@ try:
     STATE["status"] = "DONE"
 except Stop as e:
     STATE["status"], STATE["stop_reason"] = "STOPPED", str(e)
-    say(f"[{RUN_ID}] 멈춤 (단계 {STATE['phase']}): {e}")
+    (print if e.by_user else say)(f"[{RUN_ID}] 멈춤 (단계 {STATE['phase']}): {e}")
 except Exception:
     STATE["status"] = "FAILED"
     say(f"[{RUN_ID}] 오류로 멈춤 (단계 {STATE['phase']}). 고친 뒤 --resume\n```\n{traceback.format_exc()[-1500:]}\n```")
