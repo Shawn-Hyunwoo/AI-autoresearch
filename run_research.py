@@ -118,10 +118,16 @@ def say(msg):
 
 
 def ask(prompt):
-    try:
-        return input(prompt).strip()
-    except EOFError:
-        raise Stop("입력을 받을 수 없음(tmux 밖 실행). tmux에서 --resume으로 이어서 실행")
+    while True:
+        try:
+            a = input(prompt).strip()
+        except EOFError:
+            raise Stop("입력을 받을 수 없음(tmux 밖 실행). tmux에서 --resume으로 이어서 실행")
+        if any(ord(c) < 32 or ord(c) == 127 for c in a):   # 방향키(ESC [ B) 같은 제어 문자가 섞이면 지시로 받지 않는다
+            print("방향키 같은 제어 문자가 섞여 있어 받지 않았습니다. 다시 입력하세요. "
+                  "(화면 스크롤은 Ctrl-b 다음 [, 나올 때는 q)", flush=True)
+            continue
+        return a
 
 
 def sh(cmd, cwd=REPO, check=True, env=None):
