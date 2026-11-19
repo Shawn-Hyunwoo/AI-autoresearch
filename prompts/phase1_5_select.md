@@ -20,4 +20,4 @@
   "dropped_candidates": [{"id": "D2_A", "reason": "..."}]
 }
 ```
-통과시킬 후보가 없으면 selected_candidates를 빈 배열로 두고, 모든 탈락 사유를 dropped_candidates에 적는다.
+`quantum_rationale`은 트랙 A 후보에만 적고, 트랙 B와 C 후보에서는 뺀다. 통과시킬 후보가 없으면 selected_candidates를 빈 배열로 두고, 모든 탈락 사유를 dropped_candidates에 적는다.

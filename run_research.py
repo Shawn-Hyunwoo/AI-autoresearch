@@ -175,7 +175,7 @@ def agent(key, default, body, out_file, mode, human=False, env=None):
 
 
 SELECT_SCHEMA = ('```json\n{"sota_baselines": [{"id": "BASE_1", "name": "...", "kind": "classical|quantum", "source": "..."}],\n'
-                 ' "selected_candidates": [{"id": "D1_A", "title": "...", "mechanism": "...", "quantum_rationale": "...", '
+                 ' "selected_candidates": [{"id": "D1_A", "title": "...", "mechanism": "...", "quantum_rationale": "(트랙 A만)", '
                  '"pilot_setup": "..."}],\n "dropped_candidates": [{"id": "D2_A", "reason": "..."}]}\n```')
 VERDICT_SCHEMA = '출력 마지막 줄에 JSON 한 줄: {"logic_sound": true, "scope_realistic": true, "non_trivial": true, "fatal_flaws": []}'
 
