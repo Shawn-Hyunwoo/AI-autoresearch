@@ -254,6 +254,8 @@ CRITIC_SCHEMA = ('```json\n{"verdicts": [{"id": "D1_A", "verdict": "accept|revis
                  '"request": "revise일 때만"}]}\n```')
 
 
+JUDGE_SCHEMA = '```json\n{"fatal_judgments": [{"n": 1, "verdict": "인정|반박", "note": "한 줄"}]}\n```'
+JUDGE_RE = re.compile(r"\n*```json\s*(\{[^`]*?\"fatal_judgments\"[^`]*?\})\s*```\s*", re.S)   # 보고서 끝의 판단 블록
 FIX_SCHEMA = '```json\n{"fixes": [{"find": "보고서 원문 그대로", "replace": "고친 문장", "why": "근거 파일과 값"}]}\n```'
 
 
@@ -263,6 +265,12 @@ def parse_fixes(text):
                                        or not isinstance(f.get("replace"), str) for f in fx):
         raise ValueError("fixes 형식이 틀림")
     return fx
+
+
+def judgments(j):
+    # {"fatal_judgments": [...]} → {치명 지적 번호: (인정|반박, 한 줄)}
+    return {int(x["n"]): (x["verdict"], str(x.get("note", ""))) for x in j["fatal_judgments"]
+            if x.get("verdict") in ("인정", "반박")}
 
 
 def parse_critique(final):
@@ -1055,16 +1063,35 @@ def phase_audit():
     (OUT / "05_audit.md").write_text("\n\n".join(
         f"# auditor_{i:02d} ({s['provider']}/{s['model']}/{s['effort']})\n\n{t}"
         for i, (s, t) in enumerate(zip(st["auditors"], texts), 1)))
-    fatal = {}                                          # 감사자별 치명 지적. 형식을 못 받으면 None (완료 알림에서 확인하라고 띄운다)
+    items, unformatted = [], []                         # 치명 지적. 완료 알림에 reporter의 판단과 함께 띄운다
     for i, (s, t) in enumerate(zip(st["auditors"], texts), 1):
-        j = last_json(t)
-        fatal[f"auditor_{i:02d} ({s['provider']}/{s['model']})"] = \
-            [str(x) for x in j["fatal"]] if isinstance(j, dict) and isinstance(j.get("fatal"), list) else None
-    (OUT / "05_audit" / "fatal.json").write_text(json.dumps(fatal, ensure_ascii=False, indent=2))
+        who, j = f"auditor_{i:02d} ({s['provider']}/{s['model']})", last_json(t)
+        if isinstance(j, dict) and isinstance(j.get("fatal"), list):
+            items += [{"who": who, "text": str(x)} for x in j["fatal"]]
+        else:
+            unformatted.append(who)
     verify_locks()
-    agent("reporter", st["reporter"], prompt("phase5_report.md", **ctx, critique=read(OUT / "05_audit.md"),
-                                             notes=tail(MAIN / "notes.md", 80), env=read(OUT / "env.txt")[:3000]),
-          OUT / "06_report.md", "readonly", human=True)
+    text = agent("reporter", st["reporter"], prompt(
+        "phase5_report.md", **ctx, critique=read(OUT / "05_audit.md"), notes=tail(MAIN / "notes.md", 80),
+        env=read(OUT / "env.txt")[:3000],
+        fatal="".join(f"{n}. {x['who']}: {x['text']}\n" for n, x in enumerate(items, 1)) or "없음"),
+        OUT / "06_report.md", "readonly", human=True)
+    blocks = JUDGE_RE.findall(text)                     # 판단 블록은 알림용이라 보고서에서 뗀다
+    (OUT / "06_report.md").write_text(JUDGE_RE.sub("\n\n", text).strip() + "\n")
+    if items:
+        try:
+            got = judgments(json.loads(blocks[-1]))
+        except (IndexError, KeyError, TypeError, ValueError):
+            fixed = agent("reporter", st["reporter"], prompt("json_fix.md", schema=JUDGE_SCHEMA, text=text[-8000:]),
+                          OUT / "05_audit" / "fatal_judged_jsonfix.md", "readonly")
+            try:
+                got = judgments(block_json(fixed))
+            except (KeyError, TypeError, ValueError):
+                got = {}
+        for n, x in enumerate(items, 1):
+            x["verdict"], x["note"] = got.get(n, (None, ""))
+    (OUT / "05_audit" / "fatal.json").write_text(
+        json.dumps({"items": items, "unformatted": unformatted}, ensure_ascii=False, indent=2))
     if st.get("checker"):
         check_report(st["checker"], ctx)
 
@@ -1158,12 +1185,16 @@ def remote_is_private(remote):
 def phase_final():
     rep = read(OUT / "06_report.md")
     heads = [m.start() for m in re.finditer(r"^## ", rep, re.M)]   # 알림에는 결론 절(첫 절)까지만 보낸다
-    fatal = json.loads(read(OUT / "05_audit" / "fatal.json", "{}"))   # 결론만 보고 push하지 않게 감사의 치명 지적을 함께 띄운다
-    items = [f"- {who}: {x}" for who, xs in fatal.items() for x in xs or []]
-    warn = (f"감사 치명 지적 {len(items)}개 (reporter의 판단은 보고서 4절)\n" + "\n".join(items) + "\n\n" if items else "") \
-        + "".join(f"{who}: 치명 지적 목록을 형식대로 받지 못함. 05_audit.md 확인\n\n" for who, xs in fatal.items() if xs is None)
+    # 알림의 결론만 읽고 넘어가지 않게, 감사의 치명 지적과 그에 대한 reporter의 판단을 결론 앞에 붙인다
+    fatal = json.loads(read(OUT / "05_audit" / "fatal.json", "{}"))
+    items = fatal.get("items") or []
+    warn = (f"감사 치명 지적 {len(items)}개\n" + "".join(
+        f"- {x['who']}: {x['text']}\n  → reporter: "
+        + (f"{x['verdict']}. {x['note']}\n" if x.get("verdict") else "판단 없음, 보고서 4절 확인\n") for x in items)
+        + "\n" if items else "") \
+        + "".join(f"{who}: 치명 지적 목록을 형식대로 받지 못함. 05_audit.md 확인\n\n" for who in fatal.get("unformatted") or [])
     say(f"[{RUN_ID}] 완료\n{warn}보고서: {OUT / '06_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}")
-    if ask(f"{f'감사 치명 지적 {len(items)}개가 있습니다. ' if items else ''}보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
+    if ask(f"보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
         raise Stop("push 보류. 나중에 --resume으로 다시 묻습니다", by_user=True)
     final = f"{BRANCH}-final"
     git("checkout", "-q", BRANCH)
