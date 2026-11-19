@@ -310,6 +310,13 @@ def nums(rows, key="primary_metric"):
     return [r[key] for r in rows if isinstance(r.get(key), (int, float)) and not isinstance(r.get(key), bool)]
 
 
+def case_table(cases):
+    # 경우별 비교표 (마크다운). 누적표에는 그 값을 낸 시도 번호가 붙는다
+    return (f"| 경우 | {CONTRACT.get('metric', 'metric')} 평균 | 표준오차 | 시드 수 | guard | 시도 |\n|---|---|---|---|---|---|\n"
+            + "".join(f"| {k} | {v['primary_metric']} | {v['spread']} | {v['n_seeds']} | {v['guard_pass']} | "
+                      f"{v.get('attempt', '')} |\n" for k, v in sorted(cases.items())))
+
+
 def attempt_a(work):
     # 트랙 A 시도 1회: run.sh를 시드(AR_SEED)마다 돌리고, 경우(모델 × regime)마다 제어기가 채점해
     # 시드 평균과 평균의 표준오차를 낸다. 모든 경우가 모든 시드에서 guard를 통과해야 채택한다
@@ -331,9 +338,7 @@ def attempt_a(work):
                        "spread": statistics.stdev(vals) / len(vals) ** 0.5 if len(vals) > 1 else None,
                        "n_seeds": len(vals), "wall_time_sec": statistics.mean(nums(runs, "wall_time_sec") or [0]),
                        "guard_reason": next((r.get("guard_reason", "") for r in runs if not r.get("guard_pass")), "")}
-    (work / "comparison.md").write_text(        # 제어기가 채점한 경우별 비교표
-        f"| 경우 | {CONTRACT.get('metric', 'metric')} 평균 | 표준오차 | 시드 수 | guard |\n|---|---|---|---|---|\n" + "".join(
-            f"| {k} | {v['primary_metric']} | {v['spread']} | {v['n_seeds']} | {v['guard_pass']} |\n" for k, v in cases.items()))
+    (work / "comparison.md").write_text(case_table(cases))   # 제어기가 채점한 이번 시도의 경우별 비교표
     out = {"status": "ok", "cases": cases, "guard_pass": all(v["guard_pass"] for v in cases.values()),
            "guard_reason": next((f"{k}: {v['guard_reason']}" for k, v in cases.items() if not v["guard_pass"]), "")}
     (work / "score.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
@@ -570,6 +575,7 @@ def phase_track_ab(track):
             best_commit=STATE["best_commit"], best_metric=T["best_metric"], direction=DIRECTION,
             min_pct=CONTRACT.get("min_improvement_pct", 1.0), build_cmd=CFG.get("build_cmd") or "없음",
             seeds=BUDGET.get("seeds"), rounds=BUDGET.get("bench_rounds"), assigned=assigned,
+            comparison_all=read(MAIN / "comparison_all.md", "아직 없음 (첫 시도)"),
             regimes=", ".join(sorted(p.name for p in (EVAL / "inputs").glob("*") if p.is_dir())) or "main"),
             work / "agent.md", mode="full", cwd=REPO, env=ENV)
         if track == "A":
@@ -589,6 +595,9 @@ def phase_track_ab(track):
             else:                                       # 후보는 attempt_b에서 이미 커밋됨. 메시지만 바꾼다
                 git("commit", "--amend", "--allow-empty", "-q", "-m", f"B iter {it}: {summary[:60]}")
             STATE["best_commit"] = git("rev-parse", "HEAD")
+            if track == "A":                            # 채택된 시도의 경우를 누적표에 합친다 (같은 경우는 최신 값으로)
+                T.setdefault("cases", {}).update({k: {**v, "attempt": f"A{it}"} for k, v in s["cases"].items()})
+                (MAIN / "comparison_all.md").write_text(case_table(T["cases"]))
             if track == "B" and (T["best_metric"] is None or (delta or 0) > 0):   # 트랙 A는 경우별 표(comparison.md)로 본다
                 T["best_metric"] = s["primary_metric"]
             T["stale"] = 0
