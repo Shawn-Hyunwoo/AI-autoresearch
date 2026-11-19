@@ -2,6 +2,7 @@
 #   python ~/autoresearch/run_research.py --spec ~/autoresearch_runs/<프로젝트>/<run_id>/00_spec.md [--resume]
 # 순서: 작업공간 → 1 조사 → 1.5 발상·선별 → 2 파일럿·채점기 승인(트랙 A/B) → 3 트랙 A/B/C → 4 감사·보고 → push 승인
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -73,6 +74,18 @@ SPLIT_LOCK = [SPLIT_LOCK] if isinstance(SPLIT_LOCK, str) else SPLIT_LOCK
 SECOND_PASS = (CFG.get("constraints") or {}).get("timing_rule") == "second_pass"
 
 # ---- 상태
+# 같은 실행은 한 번에 하나만 돈다. 운영체제 파일 잠금이라 프로세스가 끝나거나 죽으면 저절로 풀린다
+LOCK = open(RUN / ".lock", "a+")
+try:
+    fcntl.flock(LOCK, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    LOCK.seek(0)
+    raise SystemExit(f"이 실행은 이미 다른 곳에서 돌고 있습니다 (PID {LOCK.read().strip() or '?'}). "
+                     "그 터미널(tmux 세션)로 가서 보세요. 끝내려면 그 프로세스를 Ctrl-C로 멈춥니다")
+LOCK.seek(0)
+LOCK.truncate()
+LOCK.write(str(os.getpid()))
+LOCK.flush()
 if STATE_PATH.exists() and not args.resume:
     raise SystemExit(f"이미 시작된 실행입니다 ({STATE_PATH}). 이어서 하려면 --resume")
 STATE = json.loads(STATE_PATH.read_text()) if STATE_PATH.exists() else {

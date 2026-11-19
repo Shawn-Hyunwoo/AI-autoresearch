@@ -120,7 +120,8 @@ defaults.yaml이 없으면 같은 프로젝트의 직전 명세를, 그것도 �
    - 파일럿 뒤 채점 코드 확인 (트랙 A/B): Enter = 잠그고 진행, `q` = 종료, 한글 문장 = 그대로 채점 코드 수정
    - 트랙 C에서 논리와 반례는 통과했지만 일반성 이견이 남았을 때: Enter = 감사 진행, `q` = 폐기
    - 보고서 뒤: `y` = 원본에 브랜치 `autoresearch/<run_id>`를 만들고 push (비공개 GitHub 원격일 때만 push, 아니면 브랜치만)
-4. 오류나 세션 끊김 뒤에는 같은 명령에 `--resume`을 붙입니다.
+4. 오류나 세션 끊김 뒤에는 같은 명령에 `--resume`을 붙입니다. 같은 실행은 한 번에 하나만 돕니다. 이미 돌고 있으면 그 PID를 알리고 멈춥니다.
+5. 관문 입력 줄에서 방향키는 커서 이동입니다. 화면을 위로 올려 보려면 `Ctrl-b` 다음 `[`, 나올 때는 `q`를 누릅니다.
 
 ### 주의
 
@@ -248,7 +249,8 @@ Without defaults.yaml, `/research-spec` uses the latest previous spec of the sam
    - after the pilot, to check the scoring code (tracks A/B): Enter = lock and continue, `q` = stop, any sentence = edit the scoring code as told
    - in track C, when logic and counterexample checks pass but the refuter still disagrees on generality: Enter = go to the audit, `q` = discard
    - after the report: `y` = create branch `autoresearch/<run_id>` in the original and push it (pushes only to a private GitHub remote, otherwise creates the branch only)
-4. After an error or a lost session, run the same command with `--resume`.
+4. After an error or a lost session, run the same command with `--resume`. Only one controller can run a given run at a time; a second one reports the running PID and exits.
+5. At a checkpoint prompt, arrow keys move the cursor. To scroll the tmux screen, press `Ctrl-b` then `[`, and `q` to leave.
 
 ### Caution
 
