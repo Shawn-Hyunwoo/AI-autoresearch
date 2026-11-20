@@ -17,7 +17,7 @@
    - singular(특이점): 0, 퇴화(계수 부족 행렬, 겹치는 고윳값 등), 분모가 0에 가까운 곳
    - equality(등호 근처): 양변이 같아지는 입력과 그 바로 근처. 강화한 정리의 반례는 대개 여기 있다. 등호가 성립하는 입력이 없으면 그 이유를 no_equality_reason에 적는다
    - typical(평범한 값): 가정 안의 전형적인 입력
-   상한이면 작은 크기에서 실제 값과 경계의 스케일링 기울기를 비교한다. stdout 마지막 줄에 JSON 한 줄을 출력한다(by_category는 범주별로 시험한 입력 수):
+   정리가 상한("오차는 많아야 B(n)" 꼴)이면, 크기 n을 두 배씩 키운 작은 크기 셋 이상에서 실제 값과 B(n)을 잰다. B(n) ÷ 실제 값이 크기에 따라 계속 커지면 tightness_ok를 false로, 일정하거나 줄면 true로 둔다. 상한이 아닌 정리면 true로 둔다. stdout 마지막 줄에 JSON 한 줄을 출력한다(by_category는 범주별로 시험한 입력 수):
    {"tested_cases": 0, "by_category": {"extreme": 0, "singular": 0, "equality": 0, "typical": 0}, "no_equality_reason": null, "counterexamples_found": 0, "worst_counterexample": null, "tightness_ok": true}
    제어기는 범주 하나라도 0이면(등호 근처는 이유를 적은 경우만 예외) 통과시키지 않는다. 지난 라운드에서 빠진 범주: {{prev_missing}}
    본 실행은 제어기가 한다. 너는 범주마다 입력 한두 개만 넣어 돌려 마지막 JSON 줄이 나오는지만 확인한다.
