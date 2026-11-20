@@ -773,6 +773,18 @@ def debate_log(t, d, rounds):
     return "\n\n".join(parts)
 
 
+def phase_known_c():
+    # 트랙 C: 조사가 명세의 정리를 이미 증명됐거나 반증됐다고 판정하면, 토론과 증명에 들어가기 전에 사람에게 묻는다
+    m = re.search(r"^##\s*명세의 정리는 이미 알려져 있는가\s*\n+(.+?)(?=^##?\s|\Z)", read(OUT / "01_recon.md"), re.S | re.M)
+    body = m[1].strip() if m else ""
+    if not body.lstrip("*- ").startswith(("이미 증명됨", "반증됨")):
+        return
+    say(f"[{RUN_ID}] 트랙 C: 문헌 조사에서 명세의 정리가 이미 알려진 결과로 나왔습니다.\n\n{body[:800]}\n\n"
+        f"전문: {OUT / '01_recon.md'}\n계속하면 이 정리 대신 더 일반적이거나 강한 변형을 후보로 냅니다.")
+    if ask("Enter: 변형으로 계속 | q: 종료 > ").lower() == "q":
+        raise Stop("명세의 정리가 이미 알려진 결과라 사용자가 종료", by_user=True)
+
+
 def phase_ideation():
     st, recon, d = STAGES["phase2_ideation"], read(OUT / "01_recon.md"), OUT / "02_ideation"
     R = int(BUDGET.get("max_ideation_rounds", 1))
@@ -1323,7 +1335,8 @@ def remote_is_private(remote):
     return False, "공개 저장소"
 
 
-STEP_NAME = {"workspace": "준비", "recon": "조사", "ideation": "아이디어 토론", "pilot": "파일럿", "gate_pilot": "파일럿",
+STEP_NAME = {"workspace": "준비", "recon": "조사", "known_C": "조사", "ideation": "아이디어 토론", "pilot": "파일럿",
+             "gate_pilot": "파일럿",
              "track_A": "본 실험", "track_B": "본 실험", "track_C": "본 실험", "final_test_A": "최종 시험",
              "confirm_B": "최종 비교", "audit": "감사·보고"}
 
@@ -1395,7 +1408,8 @@ def phase_final():
 
 
 # ---- 실행
-PHASES = [("workspace", phase_workspace), ("recon", phase_recon), ("ideation", phase_ideation)]
+PHASES = [("workspace", phase_workspace), ("recon", phase_recon)] \
+    + ([("known_C", phase_known_c)] if "C" in TRACKS else []) + [("ideation", phase_ideation)]
 if {"A", "B"} & set(TRACKS):
     PHASES += [("pilot", phase_pilot), ("gate_pilot", phase_gate_pilot)]
 for t in TRACKS:

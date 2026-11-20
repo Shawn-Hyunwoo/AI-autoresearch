@@ -106,6 +106,7 @@ defaults.yaml이 없으면 같은 프로젝트의 직전 명세를, 그것도 �
    `Ctrl-b d`로 빠져나와도 계속 돕니다.
 3. 멈추는 곳은 세 군데이고, `tmux attach -t research`로 들어가 답합니다.
    - 파일럿 뒤 채점 코드 확인 (트랙 A/B): Enter = 잠그고 진행, `q` = 종료, 한글 문장 = 그대로 채점 코드 수정
+   - 트랙 C에서 문헌 조사가 명세의 정리를 이미 증명됐거나 반증된 결과로 판정했을 때: Enter = 더 일반적이거나 강한 변형으로 계속, `q` = 종료
    - 트랙 C에서 논리와 반례는 통과했지만 반박 모델과 의견이 갈린 점이 남았을 때: Enter = 감사 진행, `q` = 폐기
    - 보고서 뒤: `y` = 원본에 브랜치 `autoresearch/<run_id>`를 만들고 push (비공개 GitHub 원격일 때만 push, 아니면 브랜치만)
 4. 오류나 세션 끊김 뒤에는 같은 명령에 `--resume`을 붙입니다. 같은 실행은 한 번에 하나만 돕니다. 이미 돌고 있으면 그 PID를 알리고 멈춥니다.
@@ -223,6 +224,7 @@ Without defaults.yaml, `/research-spec` uses the latest previous spec of the sam
    Detach with `Ctrl-b d`; it keeps running.
 3. It stops at three places. Attach with `tmux attach -t research` and answer:
    - after the pilot, to check the scoring code (tracks A/B): Enter = lock and continue, `q` = stop, any sentence = edit the scoring code as told
+   - in track C, when the literature survey finds the spec's theorem already proven or disproven: Enter = continue with a more general or stronger variant, `q` = stop
    - in track C, when logic and counterexample checks pass but the refuter still disagrees on generality: Enter = go to the audit, `q` = discard
    - after the report: `y` = create branch `autoresearch/<run_id>` in the original and push it (pushes only to a private GitHub remote, otherwise creates the branch only)
 4. After an error or a lost session, run the same command with `--resume`. Only one controller can run a given run at a time; a second one reports the running PID and exits.
