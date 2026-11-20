@@ -49,20 +49,27 @@ def fill(text, ctx):
 
 
 def _limited(slot):
-    calls = STATE.setdefault("calls", {})
-    if slot["provider"] in STATE.get("exhausted", []):
+    # 한도 초과는 모델 단위로 기록한다 (예: claude의 fable 주간 한도가 다 차도 opus는 쓸 수 있다)
+    calls, ex = STATE.setdefault("calls", {}), STATE.get("exhausted", [])
+    if slot["provider"] in ex or f"{slot['provider']}/{slot['model']}" in ex:
         return True
     return any(k in LIMITS and calls.get(k, 0) >= LIMITS[k] for k in (slot["model"], slot["provider"]))
 
 
 def resolve(slot):
-    # 상한에 닿았거나 한도 초과가 난 벤더면 after_quota → 벤더 fallback 순으로 바꾼다. _lock 안에서 부른다.
+    # 상한에 닿았거나 한도 초과가 난 모델이면 after_quota → 벤더 fallback 순으로 바꾼다. _lock 안에서 부른다.
+    orig = slot
     for _ in range(4):
         if not _limited(slot):
             break
         slot = slot.get("after_quota") or P["vendors"][slot["provider"]]["fallback_on_quota"]
+    if _limited(slot):   # 대체 모델도 막혔으면 그 벤더의 승격 사다리에서 막히지 않은 가장 높은 칸 (벤더 하나만 쓸 때 필요)
+        steps = [{"provider": slot["provider"], **s} for s in P["vendors"][slot["provider"]].get("escalation_ladder") or []]
+        slot = next((s for s in reversed(steps) if not _limited(s)), slot)
     if _limited(slot):
         raise RuntimeError(f"대체 모델까지 모두 한도에 걸림: {slot}")
+    if slot is not orig:                                # 완료 알림의 비용 요약에 쓴다
+        STATE.setdefault("fallbacks", []).append(f"{orig['provider']}/{orig['model']} → {slot['provider']}/{slot['model']}")
     calls = STATE["calls"]
     for k in (slot["model"], slot["provider"]):
         calls[k] = calls.get(k, 0) + 1
@@ -169,10 +176,11 @@ def call(slot, body, out_file, *, mode, cwd, env, human=False, session=None):
         time.sleep(15)                              # 일시적 문제(CLI 업데이트, 네트워크)가 지나가게 잠깐 기다린다
         with _lock:
             if any(q in tail for q in P["quota_patterns"]):
-                STATE.setdefault("exhausted", []).append(slot["provider"])
+                STATE.setdefault("exhausted", []).append(f"{slot['provider']}/{slot['model']}")
                 slot = resolve(slot)
                 continue
             if fails:                              # 두 번째 실패면 멈춘다 (모델을 바꿔도 네트워크·CLI 문제는 안 풀린다)
                 raise RuntimeError(f"모델 호출 실패 rc={rc}: {slot}. 로그 {LOG_DIR / (tag + '.log')}")
             fails = 1
+            STATE.setdefault("retries", []).append(f"{slot['provider']}/{slot['model']} {out_file.stem}")
             slot = resolve(slot)                   # 같은 슬롯으로 한 번만 더

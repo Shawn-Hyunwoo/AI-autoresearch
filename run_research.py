@@ -2,12 +2,14 @@
 #   python ~/autoresearch/run_research.py --spec ~/autoresearch_runs/<프로젝트>/<run_id>/00_spec.md [--resume]
 # 순서: 작업공간 → 1 조사 → 2 아이디어 토론·선별 → 3 파일럿·채점기 승인(트랙 A/B) → 4 트랙 A/B/C → 5 감사·보고 → push 승인
 import argparse
+import bisect
 import fcntl
 import hashlib
 import json
 import os
 import re
 import shutil
+import signal
 import socket
 import statistics
 import subprocess
@@ -182,6 +184,8 @@ def visible_locks():
 
 
 TIMEOUT = BUDGET.get("call_timeout_min")
+RUN_TIMEOUT = BUDGET.get("run_timeout_min")   # 실험 스크립트 1회의 시간 상한(분). 없으면 상한 없음
+LESSONS = RUN.parent / "lessons.md"           # 같은 프로젝트의 실행들이 함께 쓰는 교훈 파일. 사람이 고치거나 지워도 된다
 for a in ADAPT:
     print(f"[조정] {a}", flush=True)
 llm.setup(PROV, LIMITS, STATE, save_state, {
@@ -210,19 +214,23 @@ def ask(prompt):
         import readline  # noqa: F401
     except ImportError:
         pass
-    while True:
-        try:
-            a = input(prompt)
-        except EOFError:
-            raise Stop("입력을 받을 수 없음(tmux 밖 실행). tmux에서 --resume으로 이어서 실행")
-        except KeyboardInterrupt:
-            raise Stop("관문에서 Ctrl-C로 멈춤. 이어 하려면 --resume", by_user=True)
-        a = a.replace("\x1b[200~", "").replace("\x1b[201~", "").replace("\t", " ").strip()   # 붙여넣기 표시, 탭
-        if any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 for c in a):
-            print("방향키 같은 키 코드가 섞여 있어 받지 않았습니다. 다시 입력하세요. "
-                  "(화면 스크롤은 Ctrl-b 다음 [, 나올 때는 q)", flush=True)
-            continue
-        return a
+    t0 = time.time()
+    try:
+        while True:
+            try:
+                a = input(prompt)
+            except EOFError:
+                raise Stop("입력을 받을 수 없음(tmux 밖 실행). tmux에서 --resume으로 이어서 실행")
+            except KeyboardInterrupt:
+                raise Stop("관문에서 Ctrl-C로 멈춤. 이어 하려면 --resume", by_user=True)
+            a = a.replace("\x1b[200~", "").replace("\x1b[201~", "").replace("\t", " ").strip()   # 붙여넣기 표시, 탭
+            if any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 for c in a):
+                print("방향키 같은 키 코드가 섞여 있어 받지 않았습니다. 다시 입력하세요. "
+                      "(화면 스크롤은 Ctrl-b 다음 [, 나올 때는 q)", flush=True)
+                continue
+            return a
+    finally:
+        STATE["wait_sec"] = STATE.get("wait_sec", 0) + time.time() - t0   # 사람을 기다린 시간은 단계별 시간에서 뺀다
 
 
 def sh(cmd, cwd=REPO, check=True, env=None):
@@ -281,8 +289,8 @@ def agent(key, default, body, out_file, mode, human=False, env=None, session=Non
 
 
 SELECT_SCHEMA = ('```json\n{"sota_baselines": [{"id": "BASE_1", "name": "...", "kind": "classical|quantum", "source": "..."}],\n'
-                 ' "selected_candidates": [{"id": "D1_A", "title": "...", "mechanism": "...", "quantum_rationale": "(트랙 A만)", '
-                 '"pilot_setup": "...", "rank_reason": "..."}],\n "dropped_candidates": [{"id": "D2_A", "reason": "..."}]}\n```')
+                 ' "selected_candidates": [{"id": "D1_A", "title": "...", "mechanism": "...", "quantum_rationale": "(양자 후보만)", '
+                 '"pilot_setup": "...", "kill_if": "...", "rank_reason": "..."}],\n "dropped_candidates": [{"id": "D2_A", "reason": "..."}]}\n```')
 VERDICT_SCHEMA = '출력 마지막 줄에 JSON 한 줄: {"logic_sound": true, "scope_realistic": true, "non_trivial": true, "fatal_flaws": []}'
 CRITIC_SCHEMA = ('```json\n{"verdicts": [{"id": "D1_A", "verdict": "accept|revise|reject", "reason": "...", '
                  '"request": "revise일 때만"}]}\n```')
@@ -388,6 +396,22 @@ def repair(work, cmd, log, n):
           Path(work) / f"repair_{n:02d}.md", "full")
 
 
+def run_script(script, res, env):
+    # 실험 스크립트 한 번. 시간 상한이 있으면 새 프로세스 그룹으로 띄우고, 넘기면 스크립트가 띄운 프로세스까지 끝낸다
+    grp = bool(RUN_TIMEOUT)
+    p = subprocess.Popen(["bash", str(script), str(res)], cwd=REPO, env=env, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=grp)
+    try:
+        out = p.communicate(timeout=RUN_TIMEOUT * 60 if grp else None)[0]
+        return p.returncode, out
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        return 124, p.communicate()[0] + f"\n[실험 1회 시간 상한 {RUN_TIMEOUT}분을 넘겨 끊음]"
+    except BaseException:                       # Ctrl-C 등으로 제어기가 멈추면 실험도 함께 끝낸다
+        os.killpg(p.pid, signal.SIGKILL) if grp else p.kill()
+        raise
+
+
 def run_once(script, res, seed=0):
     # build_cmd → script 실행 한 번 (second_pass면 두 번 돌려 두 번째 시간만 쓴다). 반환: (종료 코드, 로그, 시간)
     env = dict(ENV, AR_SEED=str(seed))
@@ -399,8 +423,8 @@ def run_once(script, res, seed=0):
         shutil.rmtree(res, ignore_errors=True)
         res.mkdir(parents=True)
         t0 = time.perf_counter()
-        r = sh(["bash", str(script), str(res)], check=False, env=env)
-        wall, rc, log = time.perf_counter() - t0, r.returncode, r.stdout + r.stderr
+        rc, log = run_script(script, res, env)
+        wall = time.perf_counter() - t0
         if rc:
             break
     return rc, log, wall
@@ -485,8 +509,9 @@ def attempt_a(work):
             per.setdefault(name, []).append(sc)
     cases = summarize(per)
     (work / "comparison.md").write_text(case_table(cases))   # 제어기가 채점한 이번 시도의 경우별 비교표
-    out = {"status": "ok", "cases": cases, "guard_pass": all(v["guard_pass"] for v in cases.values()),
-           "guard_reason": next((f"{k}: {v['guard_reason']}" for k, v in cases.items() if not v["guard_pass"]), "")}
+    gate = {k: v for k, v in cases.items() if not k.split("@")[0].endswith("_noisy")}   # 노이즈 확인 경우는 기록용
+    out = {"status": "ok", "cases": cases, "guard_pass": all(v["guard_pass"] for v in gate.values()),
+           "guard_reason": next((f"{k}: {v['guard_reason']}" for k, v in gate.items() if not v["guard_pass"]), "")}
     (work / "score.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
     return out
 
@@ -515,12 +540,14 @@ def attempt_b(work):
         return s
     git("add", "-A")
     git("commit", "--allow-empty", "-q", "-m", "candidate (측정 중)")
+    net = sum(int(a) - int(d) for a, d, _ in (ln.split("\t", 2) for ln in
+                                               git("diff", "--numstat", STATE["best_commit"], "HEAD").splitlines()) if a != "-")
     runs = bench_pair(work, {"cand": git("rev-parse", "HEAD"), "best": STATE["best_commit"]}, BUDGET["bench_rounds"])
     cv, bv = nums(runs["cand"]), nums(runs["best"])
     cm = statistics.median(cv) if cv else None
     bm = statistics.median(bv) if bv else None
     out = {"status": "ok", "guard_pass": all(x.get("guard_pass") for x in runs["cand"]) and len(cv) == len(runs["cand"]),
-           "primary_metric": cm, "best_median": bm, "delta_pct": pct(cm, bm),
+           "primary_metric": cm, "best_median": bm, "delta_pct": pct(cm, bm), "net_lines": net,
            "spread": (max(cv) - min(cv)) / 2 if cv else None,
            "wall_time_sec": statistics.median(nums(runs["cand"], "wall_time_sec") or [0]),
            "guard_reason": next((x.get("guard_reason", "") for x in runs["cand"] if not x.get("guard_pass")), "")}
@@ -602,7 +629,10 @@ def check_citations(text):
                 f"https://export.arxiv.org/api/query?id_list={','.join(chunk)}&max_results={len(chunk)}", headers=head),
                 timeout=30).read()
             ns, found = {"a": "http://www.w3.org/2005/Atom"}, {}
-            for e in ET.fromstring(xml).findall("a:entry", ns):
+            entries = ET.fromstring(xml).findall("a:entry", ns)
+            if any(e.findtext("a:title", "", ns).strip() == "Error" for e in entries):
+                raise ValueError("arXiv 오류 응답")      # arXiv는 오류도 HTTP 200으로 돌려준다. '없음'으로 읽지 않는다
+            for e in entries:
                 m = re.search(r"abs/(.+?)(v\d+)?$", e.findtext("a:id", "", ns))
                 if m:
                     found[m[1]] = (cell(e.findtext("a:title", "", ns)), cell(e.findtext("a:author/a:name", "", ns)),
@@ -610,14 +640,24 @@ def check_citations(text):
             rows += [f"| arXiv:{x} | 있음 | {' | '.join(found[x])} |" if x in found else f"| arXiv:{x} | **없음** | | | |"
                      for x in chunk]
         except Exception as e:
-            rows += [f"| arXiv:{x} | 조회 실패 ({type(e).__name__}) | | | |" for x in chunk]
+            rows += [f"| arXiv:{x} | 조회 실패 ({e if isinstance(e, ValueError) else type(e).__name__}) | | | |"
+                     for x in chunk]
+    get = lambda url: json.loads(urllib.request.urlopen(urllib.request.Request(url, headers=head), timeout=20).read())
     for d in dois:
+        q = urllib.parse.quote(d)
         try:
-            m = json.loads(urllib.request.urlopen(urllib.request.Request(
-                f"https://api.crossref.org/works/{urllib.parse.quote(d)}", headers=head), timeout=20).read())["message"]
-            rows.append(f"| doi:{d} | 있음 | {cell((m.get('title') or [''])[0])} | "
-                        f"{cell((m.get('author') or [{}])[0].get('family', ''))} | "
-                        f"{((m.get('issued') or {}).get('date-parts') or [['']])[0][0]} |")
+            try:
+                m = get(f"https://api.crossref.org/works/{q}")["message"]
+                t, a, y = (m.get("title") or [""])[0], (m.get("author") or [{}])[0].get("family", ""), \
+                    ((m.get("issued") or {}).get("date-parts") or [[""]])[0][0]
+            except urllib.error.HTTPError as e:         # Crossref에 없으면 DataCite (arXiv가 붙이는 10.48550 DOI가 여기 있다)
+                if e.code != 404:
+                    raise
+                m = get(f"https://api.datacite.org/dois/{q}")["data"]["attributes"]
+                c = (m.get("creators") or [{}])[0]
+                t, a, y = (m.get("titles") or [{}])[0].get("title", ""), c.get("familyName") or c.get("name", ""), \
+                    m.get("publicationYear", "")
+            rows.append(f"| doi:{d} | 있음 | {cell(t)} | {cell(a)} | {y} |")
         except urllib.error.HTTPError as e:
             rows.append(f"| doi:{d} | {'**없음**' if e.code == 404 else f'조회 실패 ({e.code})'} | | | |")
         except Exception as e:
@@ -665,6 +705,35 @@ def pair_critics(divs, crits):
     return out
 
 
+def past_lessons():
+    # 같은 프로젝트의 지난 실행에서 버려진 것 (이번 실행의 절은 뺀다)
+    t = re.sub(rf"^## {re.escape(RUN_ID)} .*?(?=^## |\Z)", "", read(LESSONS), flags=re.S | re.M).strip()
+    return "\n".join(t.splitlines()[-120:]) or "없음 (이 프로젝트의 첫 실행)"
+
+
+def write_lessons():
+    # 실행이 끝나면 버려진 것과 그 이유를 원문 그대로(요약하지 않고) 프로젝트 교훈 파일에 남긴다.
+    # 이 실행의 절은 통째로 다시 쓰므로 --resume으로 여러 번 끝나도 한 번만 남는다
+    sel = json.loads(read(OUT / "02_ideation" / "02_selected.json") or "{}")
+    lines = [f"- 토론에서 탈락 {c.get('id')}: {c.get('reason', '')}" for c in sel.get("dropped_candidates") or []]
+    lines += [ln for ln in read(MAIN / "notes.md").splitlines() if re.search(r"\[(discard|crash)\]", ln)]
+    lines += [f"- 최종 시험에서 guard 실패 {k}: {v.get('guard_reason', '')[:200]}"
+              for k, v in json.loads(read(MAIN / "final_test.json") or "{}").items() if not v.get("guard_pass")]
+    v = (STATE.get("track_C") or {}).get("verdict")
+    keys = ("logic_sound", "scope_realistic", "non_trivial", "tightness_ok")
+    if v and (v.get("counterexamples_found") or v.get("coverage_missing") or not all(v.get(k) for k in keys)):
+        more = ("counterexamples_found", "coverage_missing", "fatal_flaws")
+        lines.append(f"- 트랙 C 마지막 판정: {json.dumps({k: v.get(k) for k in keys + more}, ensure_ascii=False)}")
+    lines += [f"- 감사 치명 지적 ({x['who']}): {x['text']} → reporter {x.get('verdict') or '판단 없음'}. {x.get('note', '')}"
+              for x in json.loads(read(OUT / "05_audit" / "fatal.json") or "{}").get("items") or []]
+    if STATE["status"] == "STOPPED" and STATE["phase"] != "final":
+        lines.append(f"- 멈춤 ({STATE['phase']}): {STATE.get('stop_reason', '')[:300]}")
+    title = next((re.sub(r"^연구 명세:\s*", "", ln[2:].strip()) for ln in SPEC_TEXT.splitlines() if ln.startswith("# ")), "")
+    block = f"## {RUN_ID} (트랙 {TRACKS[0]}, {STATE['status']})\n- 명세: {title}\n" + "\n".join(lines or ["- 버려진 것 없음"])
+    old = re.sub(rf"^## {re.escape(RUN_ID)} .*?(?=^## |\Z)", "", read(LESSONS), flags=re.S | re.M).strip()
+    LESSONS.write_text((old + "\n\n" if old else "") + block + "\n")
+
+
 def debate_turn(t, r, R, st, recon, d):
     # 토론 하나의 r회차: diverger 차례 → critic 차례. 비평자 판정 목록을 돌려준다 (형식을 끝내 못 맞추면 None)
     i, final = t["n"], r == R
@@ -672,13 +741,14 @@ def debate_turn(t, r, R, st, recon, d):
     rule = "이번이 마지막 판정이다. revise는 쓸 수 없다. 완벽하지 않아도 지금 내용으로 accept나 reject를 정한다." if final else ""
     if r == 1:
         body = prompt("phase2_diverge.md", n=i, track=",".join(TRACKS), lens=dslot.get("lens", "자유"), spec=SPEC_TEXT,
-                      recon=recon, max_rounds=R)
+                      recon=recon, max_rounds=R, lessons=past_lessons())
     else:
         body = prompt("phase2_revise.md", round=r, max_rounds=R, critique=read(d / f"t{i:02d}_r{r - 1}_critic.md"),
                       last=" 이번 답 뒤의 판정이 마지막이고, 그때는 보완 요청 없이 채택이나 탈락으로 끝난다." if final else "")
     reply = agent(f"ideation_d{i}", dslot, body, d / f"t{i:02d}_r{r}_diverger.md", "readonly", session=t["dsess"])
     if r == 1:
-        cbody = prompt("phase2_critic.md", spec=SPEC_TEXT, recon=recon, ideas=reply, max_rounds=R, final_rule=rule)
+        cbody = prompt("phase2_critic.md", spec=SPEC_TEXT, recon=recon, ideas=reply, max_rounds=R, final_rule=rule,
+                       lessons=past_lessons())
     else:
         cbody = prompt("phase2_recritic.md", round=r, max_rounds=R, reply=reply, final_rule=rule,
                        open_ids=", ".join(k for k, v in t["verdicts"].items() if v["verdict"] == "revise"))
@@ -893,10 +963,12 @@ def phase_track_ab(track):
             keep = bool(s.get("guard_pass"))
         else:
             s = attempt_b(work)
-            delta = s.get("delta_pct")
-            keep = bool(s.get("guard_pass")) and delta is not None and delta >= CONTRACT.get("min_improvement_pct", 1.0)
+            delta, mp = s.get("delta_pct"), CONTRACT.get("min_improvement_pct", 1.0)
+            simpler = delta is not None and abs(delta) < mp and (s.get("net_lines") or 0) < 0   # 같은 속도에 코드가 줄면 채택
+            keep = bool(s.get("guard_pass")) and delta is not None and (delta >= mp or simpler)
         disc = [ln.split(":", 1)[1].strip() for ln in text.splitlines() if ln.startswith("DISCOVERY:")][:3]
-        summary = (f"[{cand.get('id')}] " if cand else "") + ("; ".join(disc) or s.get("guard_reason", ""))
+        summary = ("(단순화) " if track == "B" and keep and simpler else "") + (f"[{cand.get('id')}] " if cand else "") \
+            + ("; ".join(disc) or s.get("guard_reason", ""))
         if keep:
             if track == "A":
                 git("add", "-A")
@@ -1119,14 +1191,40 @@ def phase_audit():
         check_report(st["checker"], ctx)
 
 
+NUM_RE = re.compile(r"(?<![\w.])-?(?:\d+\.\d+(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+)(?![\w.])")
+
+
+def unmatched_numbers(report):
+    # 보고서의 소수(소수점이나 지수가 있는 수) 가운데 결과 파일과 조사 결과 어디에도 없는 값. 반올림과 % 변환은 같은 값으로 본다.
+    # 계산해서 나온 값일 수도 있으므로 판정은 checker가 한다. 감사 글과 보고서 자신은 근거로 치지 않는다
+    srcs = [p for p in OUT.rglob("*") if p.is_file() and p.stat().st_size < 5e6 and "05_audit" not in p.parts
+            and (p.suffix in (".json", ".tsv", ".csv") or p.name in (
+                "01_recon.md", "comparison.md", "comparison_all.md", "final_test.md", "B_confirm.md", "pilot_table.md"))]
+    known = sorted({float(x) for p in srcs for x in NUM_RE.findall(read(p))})
+
+    def found(v, tol):
+        i = bisect.bisect_left(known, v - tol)
+        return i < len(known) and known[i] <= v + tol
+    out = []
+    for x in dict.fromkeys(NUM_RE.findall(report)):
+        mant, _, exp = x.lower().partition("e")
+        tol = 0.5 * 10 ** (int(exp or 0) - (len(mant.split(".")[1]) if "." in mant else 0))   # 마지막 자리의 반올림 폭
+        v = float(x)
+        if not any(found(a, b) for a, b in ((v, tol), (v / 100, tol / 100), (v * 100, tol * 100))):
+            out.append(x)
+    return out
+
+
 def check_report(ch, ctx):
     # 보고서를 다른 벤더 모델이 결과 파일과 대조한다. 검토자는 고칠 문장(원문 그대로)과 고친 문장만 내고,
     # 제어기가 그 문장만 바꾼다(나머지 글은 그대로). 고친 내용은 보고서 끝 '검토 기록'에 남긴다
     draft = read(OUT / "06_report.md")
     (OUT / "06_report_draft.md").write_text(draft)
+    miss = unmatched_numbers(draft)
     try:
         _, fixes = agent_json("checker", ch, prompt("phase5_check.md", **ctx, report=draft,
-                                                    comparison=read(MAIN / "comparison_all.md", "없음")),
+                                                    comparison=read(MAIN / "comparison_all.md", "없음"),
+                                                    unmatched=", ".join(miss[:80]) or "없음"),
                               OUT / "05_audit" / "report_check.md", "readonly", parse_fixes, FIX_SCHEMA)
     except ValueError:
         fixes = None
@@ -1205,6 +1303,30 @@ def remote_is_private(remote):
     return False, "공개 저장소"
 
 
+STEP_NAME = {"workspace": "준비", "recon": "조사", "ideation": "아이디어 토론", "pilot": "파일럿", "gate_pilot": "파일럿",
+             "track_A": "본 실험", "track_B": "본 실험", "track_C": "본 실험", "final_test_A": "최종 시험",
+             "confirm_B": "최종 비교", "audit": "감사·보고"}
+
+
+def cost_summary():
+    # 완료 알림 끝에 붙이는 비용 요약: 벤더·모델별 호출 수, 단계별 시간(사람 대기 제외), 재시도와 한도 초과 대체
+    calls, sec = STATE.get("calls", {}), {}
+    for k, v in (STATE.get("phase_sec") or {}).items():
+        if k in STEP_NAME:
+            sec[STEP_NAME[k]] = sec.get(STEP_NAME[k], 0) + v
+    mins = lambda s: f"{s / 60:.0f}분" if s >= 60 else "1분 미만"
+    vend = [f"{k} {calls[k]}회 (" + ", ".join(f"{m} {calls[m]}" for m in v["aliases"] if calls.get(m)) + ")"
+            for k, v in PROV["vendors"].items() if calls.get(k)]
+    retry, subs = STATE.get("retries") or [], {}
+    for x in STATE.get("fallbacks") or []:
+        subs[x] = subs.get(x, 0) + 1
+    lines = [f"비용: 모델 호출 {sum(calls.get(k, 0) for k in PROV['vendors'])}회, 걸린 시간 {mins(sum(sec.values()))}",
+             " · ".join(vend), "단계별: " + " · ".join(f"{k} {mins(v)}" for k, v in sec.items()),
+             f"재시도 {len(retry)}회" + (f" ({', '.join(retry)})" if retry else "")
+             + (", 한도 초과 대체 " + ", ".join(f"{k} {n}회" for k, n in subs.items()) if subs else ", 한도 초과 대체 없음")]
+    return lines[0] + "".join(f"\n- {x}" for x in lines[1:] if x)
+
+
 def phase_final():
     rep = read(OUT / "06_report.md")
     heads = [m.start() for m in re.finditer(r"^## ", rep, re.M)]   # 알림에는 결론 절(첫 절)까지만 보낸다
@@ -1217,7 +1339,8 @@ def phase_final():
         + "\n" if items else "") \
         + "".join(f"{who}: 치명 지적 목록을 형식대로 받지 못함. 05_audit.md 확인\n\n" for who in fatal.get("unformatted") or [])
     warn += "".join(f"참고: {a}\n" for a in ADAPT) + ("\n" if ADAPT else "")
-    say(f"[{RUN_ID}] 완료\n{warn}보고서: {OUT / '06_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}")
+    say(f"[{RUN_ID}] 완료\n{warn}보고서: {OUT / '06_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}"
+        f"\n\n{cost_summary()}")
     if ask(f"보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
         raise Stop("push 보류. 나중에 --resume으로 다시 묻습니다", by_user=True)
     final = f"{BRANCH}-final"
@@ -1271,7 +1394,12 @@ try:
         STATE["phase"] = name
         save_state()
         print(f"\n== {name}", flush=True)
-        fn()
+        t0, w0 = time.time(), STATE.get("wait_sec", 0)
+        try:
+            fn()
+        finally:                                        # 단계별 시간 (사람을 기다린 시간은 뺀다). 비용 요약에 쓴다
+            ps = STATE.setdefault("phase_sec", {})
+            ps[name] = ps.get(name, 0) + time.time() - t0 - (STATE.get("wait_sec", 0) - w0)
         STATE["done"].append(name)
         save_state()
     STATE["status"] = "DONE"
@@ -1284,3 +1412,8 @@ except Exception:
     raise
 finally:
     save_state()
+    if STATE["status"] in ("DONE", "STOPPED"):          # 오류가 아닌 끝: 버려진 것을 프로젝트 교훈 파일에 남긴다
+        try:
+            write_lessons()
+        except Exception as x:
+            print(f"교훈 파일을 쓰지 못함: {x}", flush=True)

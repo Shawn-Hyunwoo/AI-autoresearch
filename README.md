@@ -11,7 +11,7 @@
 자율 연구 도구입니다. 연구 질문 하나를 주면 여러 언어 모델(Claude, Gemini 계열 `agy`, Codex)이 선행연구 조사, 아이디어 토론, 파일럿, 본 실험이나 증명, 교차 감사, 보고서 작성까지 차례로 해 나갑니다. 트랙 A·C의 선행연구는 세 벤더가 따로 조사한 뒤 합치고, 인용한 논문이 실제로 있는지 직접 조회합니다. 아이디어 토론에서는 제안하는 모델과 비평하는 모델이 1:1로 여러 회차 주고받습니다. 사람은 처음에 명세를 정하고, 중간의 몇 군데 관문에서 확인만 합니다. 설계 전체는 [docs/design_ko.md](docs/design_ko.md)에 있습니다.
 
 연구 목적에 따라 세 갈래(트랙)로 나뉘고, 한 번 실행할 때 트랙 하나를 고릅니다.
-- 트랙 A: 새 양자 모델이나 방법이 실제로 쓸모 있는지 기준선과 비교해 확인합니다.
+- 트랙 A: 새 모델, 방법, 분석이 실제로 쓸모 있는지 기준선과 비교해 확인합니다. 양자 방법이면 고전적으로 흉내 낸 기준선, 자원량, 노이즈 아래 결과까지 봅니다.
 - 트랙 B: 코드, 시뮬레이터, 알고리즘을 정확도를 지키면서 더 빠르게 만듭니다.
 - 트랙 C: 새 정리를 증명하고, 다른 모델이 그 증명을 반박하며 수치로 반례를 찾습니다.
 
@@ -115,7 +115,7 @@ defaults.yaml이 없으면 같은 프로젝트의 직전 명세를, 그것도 �
 
 - 코드를 고치는 단계의 에이전트는 권한 확인 없이 명령을 실행합니다. 그런 실행을 받아들일 수 있는 서버에서만 쓰세요.
 - 에이전트와 제어기가 같은 리눅스 사용자로 돌기 때문에, 에이전트가 `hidden/`을 일부러 찾아 읽는 것까지는 막지 못합니다. 그런 흔적은 Phase 5 감사에서 확인합니다.
-- 아직 시험 단계입니다. 실제 모델로는 작은 장난감 문제에서만 끝까지 돌려 봤습니다. 최근에 넣은 기능 일부(여러 회차 토론, 교차 조사, 최종 시험 등)는 모델 대신 가짜 응답을 넣은 모의 실행으로만 확인했습니다.
+- 아직 시험 단계입니다. 실제 모델로는 작은 장난감 문제에서만 돌려 봤습니다. 감사·보고 단계의 최근 기능(보고서 수치 대조, 비용 요약)과 실행 간 교훈 파일은 모델 대신 가짜 응답을 넣은 모의 실행으로만 확인했습니다.
 
 ### 라이선스
 
@@ -130,7 +130,7 @@ MIT 라이선스입니다. 저작권 표시만 유지하면 누구나 쓰고, �
 A tool for autonomous research. Given one research question, several language models (Claude, the Gemini-based `agy`, and Codex) carry it through a literature and repository survey (for tracks A and C, three vendors search separately and every cited arXiv ID and DOI is looked up), idea debates (each proposing model argues with one critic over several rounds), a pilot, the main experiment or proof, a cross-vendor audit, and a final report. A person writes the spec at the start and only confirms at a few checkpoints. The full design (in Korean) is in [docs/design_ko.md](docs/design_ko.md).
 
 There are three tracks, and each run uses one:
-- Track A: show that a new quantum model or method is actually useful, against baselines.
+- Track A: show that a new model, method or analysis is actually useful, against baselines. For a quantum method it also checks a classical simulation baseline, resource counts and results under noise.
 - Track B: make code, simulators, or algorithms faster without breaking accuracy.
 - Track C: prove a new theorem while another model attacks the proof and searches for numerical counterexamples.
 
@@ -232,7 +232,7 @@ Without defaults.yaml, `/research-spec` uses the latest previous spec of the sam
 
 - Agents in code-editing stages run commands without asking for permission. Use this only on a machine where that is acceptable.
 - Agents and the controller run as the same Linux user, so an agent that deliberately searches for `hidden/` can still read it. The Phase 5 audit looks for signs of that.
-- This is still experimental. It has been run end to end with real models only on small toy problems. Some recent features (multi-round debates, cross-vendor search, the final test) have been checked only in mock runs, with fake responses in place of model calls.
+- This is still experimental. It has been run with real models only on small toy problems. Recent features of the audit and report stage (number check, cost summary) and the cross-run lessons file have been checked only in mock runs with fake model responses.
 
 ### License
 

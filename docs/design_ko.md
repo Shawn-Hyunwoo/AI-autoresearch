@@ -11,7 +11,7 @@
 원격 GPU 서버의 tmux에서 도는 범용 자율 연구 도구다. 사람이 연구 질문을 주면 `claude`와 대화해 연구 명세(`00_spec.md`)를 확정한다. 그 뒤 여러 회사 모델(Claude, Gemini 계열 `agy`, Codex)이 선행연구 조사, 아이디어 토론, 파일럿, 본 실험이나 증명, 교차 감사, 보고서 작성까지 한다. 특정 프로젝트에 묶이지 않는다.
 
 트랙은 셋이고, 한 실행에 하나만 고른다. 여러 트랙을 한 실행에 넣으면 후보 목록, 기준 코드, 기록, 채점 기준을 같이 써서 서로 섞이므로, 여러 트랙이 필요하면 실행을 나눈다.
-- **A 효용 실증:** 새 양자 모델이나 방법(QML 구조, 양자 커널, 변분 회로, 하이브리드 알고리즘)이 기준선보다 쓸모 있는지, 어떤 구간에서 강한지 보인다.
+- **A 효용 실증:** 새 모델, 방법, 분석(ML 모델, 알고리즘, 데이터 분석, 양자 방법 등)이 기준선보다 쓸모 있는지, 어떤 구간에서 강한지 보인다.
 - **B 코드 최적화:** 시뮬레이터, 연산 커널, 근사 휴리스틱을 정확도를 지키면서 더 빠르거나 가볍게 만든다.
 - **C 정리 증명:** 오차 경계, 복잡도 상하한, 수렴성 같은 새 정리를 증명하고 수치로 반례를 찾는다.
 
@@ -74,7 +74,8 @@
 - **기록:** 호출 하나에 출력 파일 하나를 쓴다. 보낸 프롬프트와 CLI 출력 전체는 실행 폴더의 `llm_logs/`에 남고 원본으로 가지 않는다.
 - **상한과 대체:**
   - 실행당 호출 상한(`budget.run_limits`, 키는 모델 별명이나 벤더)에 닿으면 슬롯의 `after_quota`로 넘어가고, 없으면 벤더의 `fallback_on_quota`로 넘어간다.
-  - CLI가 한도 초과 문구를 내면 그 벤더를 이번 실행에서 뺀다.
+  - CLI가 한도 초과 문구를 내면 그 모델을 이번 실행에서 뺀다. 같은 벤더의 다른 모델은 계속 쓴다(예: fable 주간 한도가 차도 opus는 쓴다).
+  - 대체 모델까지 막혔으면 그 벤더의 승격 사다리에서 막히지 않은 가장 높은 칸으로 간다. 벤더를 하나만 쓰는 명세에서 대체 모델이 같은 벤더일 때 필요하다.
 - **실행 파일 없음:** CLI 자동 업데이트 중에는 실행 파일이 잠깐 없다. 다시 생길 때까지 최대 5분 기다리고, 이것은 실패로 세지 않는다.
 - **그 밖의 실패:** 15초 뒤 같은 모델로 한 번 다시 시도하고, 또 실패하면 멈춘다. 모델을 바꿔도 네트워크나 CLI 문제는 풀리지 않으므로 바꾸지 않는다.
 - **시간 제한:** 기본으로 두지 않는다. `budget.call_timeout_min`을 적으면 그 시간을 넘긴 호출을 프로세스 그룹째 끝낸다.
@@ -95,23 +96,27 @@
 
 | 단계 | 기본 배정 (provider/model/effort) | 권한 |
 |---|---|---|
-| `phase1_recon` | repo_scan `claude/opus/high`, lit_search `claude/opus/xhigh` (조사자는 `providers.yaml`의 `search`) | 읽기 전용 |
-| `phase2_ideation` | divergers `claude/fable/high`, `claude/opus/xhigh`, `agy/neon/xhigh` / critics `agy/neon/xhigh`, `codex/sol/xhigh` / selector `claude/opus/xhigh` | 읽기 전용 |
-| `phase3_pilot` | builder `claude/opus/xhigh` / explainer `agy/neon/high` | builder 전체 허용 |
+| `phase1_recon` | repo_scan `claude/opus/medium`, lit_search `claude/fable/high` (조사자는 `providers.yaml`의 `search`: `claude/fable/medium`, `agy/neon/high`, `codex/sol/high`) | 읽기 전용 |
+| `phase2_ideation` | divergers `claude/fable/high`, `claude/opus/xhigh`, `agy/neon/high` / critics `codex/astra/high`, `agy/neon/xhigh`, `claude/opus/xhigh` / selector `claude/fable/high` | 읽기 전용 |
+| `phase3_pilot` | builder `claude/fable/high` / explainer `agy/neon/medium` | builder 전체 허용 |
 | `crash_repair` | `claude/opus/high` | 전체 허용 |
 | `phase4_track_a` | experimenter `claude/opus/xhigh` | 전체 허용 |
 | `phase4_track_b` | worker `claude/opus/high` / unstuck_peer `agy/neon/xhigh` | worker 전체 허용 |
-| `phase4_track_c` | prover `claude/fable/xhigh` (상한 뒤 `opus/max`) / refuter `codex/astra/high` (상한 뒤 `agy/neon/xhigh`) | refuter 전체 허용 |
-| `phase5_audit` | auditors `agy/neon/high`, `codex/sol/high` / reporter `claude/opus/high` / checker `agy/neon/high` | 읽기 전용 |
+| `phase4_track_c` | prover `claude/fable/high` (상한 뒤 `opus/xhigh`) / refuter `codex/astra/high` (상한 뒤 `agy/neon/xhigh`) | refuter 전체 허용 |
+| `phase5_audit` | auditors `agy/neon/high`, `codex/astra/high` / reporter `claude/opus/xhigh` / checker `agy/neon/high` | 읽기 전용 |
 
-배정의 기준:
-- 핵심 연구 단계에는 `sonnet`을 쓰지 않는다.
+배정의 기준 (모델·추론 단계별 공개 벤치마크의 성능, 시간, 가격을 보고 정했다):
+- max 단계는 쓰지 않는다. fable과 astra는 xhigh와 high, max와 xhigh의 종합 점수 차이가 작은데 시간과 비용은 1.5배 넘게 든다. opus max는 첫 응답까지 몇 분이 걸린다.
+- fable은 한 번만 부르는 결정적 단계(조사 정리, 선별, 채점 코드, 증명)에 high로 쓴다. fable은 주간 한도가 따로 있어 반복 루프에는 쓰지 않는다.
+- opus는 반복 루프(본 실험, 수리)와 글쓰기(보고서)에 쓴다. 문서 작성 평가에서 가장 높다.
+- codex(astra)는 코딩과 과학 계산 평가가 높고 가볍다. 다만 요금제에 따라 한도가 작으므로 비평 1, 감사 1, 반박처럼 몇 번만 부르는 자리에 둔다.
+- agy(neon)는 지어내지 않는 쪽 평가가 가장 높아 대조와 검증(조사, 보고서 검토, 감사)에 둔다.
 - critic은 후보의 채택과 탈락을 정하므로 짝지을 diverger보다 약하지 않게 둔다.
 - builder는 채점 코드를 쓰므로 강하게 둔다. 채점 코드가 틀리면 뒤 단계가 모두 틀린다.
 
 codex 호출 수와 상한:
-- 기본 배정에서 codex 호출은 트랙 A가 4번(조사 1, 비평 2, 감사 1)이고, 트랙 C를 3라운드 돌리면 7번이다.
-- 템플릿의 상한 3을 넘는 뒤쪽 호출은 대체 모델로 넘어간다.
+- 기본 배정에서 codex 호출은 트랙 A가 3번(조사 1, 비평 1, 감사 1), 트랙 B가 2번, 트랙 C를 3라운드 돌리면 6번이다(토론 1회차 기준).
+- 템플릿의 상한 6을 넘는 뒤쪽 호출은 대체 모델로 넘어간다.
 - 감사가 대체되면 감사자 둘의 벤더가 같아질 수 있다.
 
 ## 3. 흐름
@@ -167,7 +172,7 @@ codex 호출 수와 상한:
 3. **교차 조사(A·C):** `providers.yaml`에 `search`가 있는 벤더(기본 셋)가 같은 주제를 따로 조사한다.
    - 조사자는 명세에 나오지 않는 내부 기본값이다. 명세의 `stages.phase1_recon.searchers`로 바꿀 수 있지만 템플릿에는 두지 않는다.
    - 최근 몇 개월을 반드시 검색하라는 규칙은 두지 않는다. 최근 결과와 기본 문헌을 함께 찾으라고만 한다.
-4. **인용 확인(제어기, 모델 없음):** 보고에 나온 arXiv 번호와 DOI를 arXiv API와 Crossref로 직접 조회해 실제로 있는지와 제목, 첫 저자, 연도를 표로 만든다.
+4. **인용 확인(제어기, 모델 없음):** 보고에 나온 arXiv 번호와 DOI를 arXiv API와 Crossref(Crossref에 없으면 DataCite. arXiv가 붙이는 `10.48550` DOI는 DataCite에 있다)로 직접 조회해 실제로 있는지와 제목, 첫 저자, 연도를 표로 만든다.
 5. **정리·검증(`lit_search`):** 조사 보고와 인용 확인 표를 받아 다음을 한다.
    - 같은 출처를 합치고, 몇 명이 찾았는지 적는다.
    - 틀린 인용을 바로잡거나 뺀다.
@@ -186,7 +191,9 @@ codex 호출 수와 상한:
 1. **발산 원칙:**
    - `Known Approaches`의 뻔한 변형은 내지 않는다.
    - 다른 분야의 방법을 구조적으로 옮겨 온다.
-   - 트랙 A는 양자 접근을 쓸 최소한의 물리적·수학적 근거를 따진다.
+   - 트랙 A의 양자 방법 후보는 양자 접근을 쓸 최소한의 물리적·수학적 근거를 따진다.
+   - 후보마다 `kill_if`(어떤 결과가 나오면 버리는가)를 한 줄 적는다. 파일럿 관문과 감사가 이 조건을 본다.
+   - 같은 프로젝트의 지난 실행에서 버려진 것(`lessons.md`, 3절 끝)을 받는다. 같은 아이디어를 다시 내려면 그때의 이유를 어떻게 피하는지 적는다.
    - 트랙 C에서 명세가 특정 정리를 다루면 그 정리를 첫 후보로 두기를 권한다(강제하지 않는다).
 2. **1:1 토론:** diverger마다 critic 한 명을 짝짓는다. 다른 벤더 critic 가운데 맡은 토론이 적은 쪽을 먼저 고르고, 토론은 모두 동시에 진행한다.
    - 1회차: diverger가 후보(`D<n>_A`…)를 낸다. critic은 후보마다 채택(accept), 보완 요청(revise), 탈락(reject)을 JSON으로 낸다.
@@ -250,16 +257,19 @@ codex 호출 수와 상한:
 2. 제어기가 실행하고, 필요하면 수리하고, 채점한다.
 3. 채택이면 커밋한다. 아니면 `git reset --hard`와 `git clean -fd`로 직전 최고 커밋으로 되돌린다.
 
+`budget.run_timeout_min`을 적으면 실험 스크립트 1회가 그 시간을 넘길 때 스크립트가 띄운 프로세스까지 끝내고 비정상 종료로 처리한다(수리 단계로 간다). 적지 않으면 상한이 없다.
+
 에이전트가 `NEXT: done`을 쓰거나 `max_iterations`에 닿으면 끝난다.
 
 #### 트랙 A: 효용 실증
 
-- **경우별 채점:** `run.sh`는 경우마다 폴더 `<모델 id>` 또는 `<모델 id>@<regime>`을 만든다. 제어기가 폴더마다 채점하고 `AR_SEED=0..seeds-1`로 돌려 평균과 평균의 표준오차를 낸다. 모든 경우가 모든 시드에서 guard를 통과해야 채택한다.
+- **경우별 채점:** `run.sh`는 경우마다 폴더 `<모델 id>` 또는 `<모델 id>@<regime>`을 만든다. 제어기가 폴더마다 채점하고 `AR_SEED=0..seeds-1`로 돌려 평균과 평균의 표준오차를 낸다. 모든 경우가 모든 시드에서 guard를 통과해야 채택한다. 모델 id가 `_noisy`로 끝나는 경우(양자 후보의 노이즈 확인)는 채점해 표에 남기지만 채택 조건에서 뺀다.
 - **누적 비교표(`comparison_all.md`):** 채택된 경우를 최신 값으로 합친다. 에이전트는 이 표를 받고, 이미 채점된 경우는 다시 돌리지 않는다.
 - **공정한 비교:**
   - 후보와 기준선 모두 비슷한 정도로 조정한 뒤 비교한다.
-  - 양자 모델 앞에 고전 전처리가 있으면, 같은 전처리 뒤에 비슷한 크기의 고전 모델을 붙인 대조군을 함께 돌린다.
-  - 표본 수, 노이즈, 크기 등을 바꿔 양자 접근이 강하거나 버티는 구간을 찾는다.
+  - 후보 앞에 전처리가 있으면, 같은 전처리 뒤에 비슷한 크기의 단순한 모델을 붙인 대조군을 함께 돌린다.
+  - 표본 수, 노이즈, 크기 등을 바꿔 후보가 강하거나 버티는 구간을 찾는다.
+- **양자 후보에 더하는 것:** 같은 문제를 고전적으로 효율적으로 흉내 내는 기준선(텐서망, Pauli 경로, dequantization, 고전 커널 근사 가운데 맞는 것), 큐비트 수를 바꾼 구간 탐색, 경우마다 `resources.json`(큐비트 수, 깊이, 2큐비트 게이트 수, 샷 수), 유한 샷과 간단한 노이즈 모델 아래의 `_noisy` 경우 하나. 노이즈 확인은 기록용이다.
   - regime 밖 데이터로 낸 수치는 채점되지 않으며 `exploratory/`에 "채점 안 됨"으로 둔다.
 - **최종 시험(루프 뒤, 모델 호출 없음):** 본 실험은 검증 점수를 보며 시도를 고르므로 그 점수는 실제보다 좋게 나온다. 그래서 루프가 끝나면 한 번 더 잰다.
   - 누적표의 경우마다 그 값을 낸 시도의 커밋과 `run.sh`로 최종 시험 입력을 돌린다. 시드는 1000부터 새로 쓰고, 채점은 최종 정답으로 한다.
@@ -274,6 +284,7 @@ codex 호출 수와 상한:
   - 후보가 `max_iterations`보다 많으면 시작할 때 화면에 알리고 시도하지 못할 후보를 `notes.md`에 적는다. 할 일이 없는 알림이라 Slack으로는 보내지 않는다.
 - **교대 측정:** 먼저 한 번 실행해 오류와 guard를 본다. 그다음 후보 커밋과 현재 최고 커밋을 `bench_rounds`번 번갈아 재고(라운드마다 순서를 바꾼다) 중앙값을 비교한다.
   - guard를 통과하고 `min_improvement_pct` 이상 좋아져야 채택한다.
+  - 단순성 기준: 지표 차이가 ±`min_improvement_pct` 안이어도 코드 줄 수가 줄면 채택한다(`results.tsv`에 "(단순화)"로 표시). 같은 성능이면 단순한 코드가 낫다.
   - 공유 GPU에서는 한 번만 재면 잡음이 최소 개선 폭보다 클 수 있어서 교대로 잰다.
 - **정체 돌파:** 연속 2회 채택되지 않으면 주력 슬롯을 승격하고, 다른 벤더(`unstuck_peer`)에게 구조가 다른 방향을 자문받는다.
 - **최종 비교(루프 뒤, 모델 호출 없음):** 시도마다 그때의 최고 기록과 비교해 채택하므로, 잡음 덕에 우연히 좋게 나온 시도가 채택되어 쌓이면 개선 폭이 부풀려진다.
@@ -325,15 +336,23 @@ prover(읽기 전용)가 증명을 쓰고 다른 벤더의 refuter(전체 허용
 - 치명 지적마다 4절에서 인정이나 반박을 정한다. 인정하면 결론을 그에 맞게 쓴다.
 - 지적별 판단은 보고서 끝에 JSON으로 덧붙인다. 제어기가 그 블록을 떼어 `05_audit/fatal.json`에 모으고 보고서에서는 지운다.
 
-**완료 알림:** 결론 절 앞에 치명 지적마다 "→ reporter: 인정/반박. 한 줄"을 붙인다. 사람은 주로 Slack의 결론만 보므로, 알림만으로 결론이 살아 있는지 판단할 수 있게 한 것이다.
+**완료 알림:** 결론 절 뒤에 비용 요약(벤더·모델별 호출 수, 단계별 시간, 재시도와 한도 초과 대체)을 붙인다. 단계별 시간에서 관문에서 사람을 기다린 시간은 뺀다. 결론 절 앞에는 치명 지적마다 "→ reporter: 인정/반박. 한 줄"을 붙인다. 사람은 주로 Slack의 결론만 보므로, 알림만으로 결론이 살아 있는지 판단할 수 있게 한 것이다.
 - 판단이 빠진 지적은 "판단 없음, 보고서 4절 확인"으로 띄운다.
 - 형식을 지키지 않은 감사자도 그 사실을 띄운다.
 - push 질문에는 넣지 않는다. push는 이 실행을 별도 브랜치로 남길지만 정한다.
 
 **보고서 검토(`checker`, 보고 모델과 다른 벤더):** 감사는 보고서보다 먼저 돌기 때문에 보고서 자체를 확인하는 단계를 따로 둔다.
+- 제어기가 먼저 보고서의 소수(소수점이나 지수가 있는 수)를 결과 파일(json, tsv, csv, 비교표, 조사 결과)의 수치와 반올림·% 변환까지 맞춰 보고, 찾지 못한 수치 목록을 checker에게 넘긴다. 계산해서 나온 값일 수 있으므로 판정은 checker가 한다.
 - 보고서의 수치를 결과 파일과 대조한다. 결론 수치가 최종 확인 값인지, "모두"·"항상" 같은 말이 표의 모든 행에서 맞는지 본다.
 - 고칠 문장과 고친 문장만 JSON으로 낸다. 제어기는 그 문장만 바꾸고 끝에 `검토 기록`을 붙인다.
 - 검토 전 원고는 `06_report_draft.md`로 남긴다.
+
+### 실행 간 교훈 (`~/autoresearch_runs/<프로젝트>/lessons.md`)
+
+실행이 오류 없이 끝나거나 멈추면 버려진 것과 그 이유를 이 파일에 원문 그대로 남긴다. 토론에서 탈락한 후보, 버려지거나 비정상 종료된 시도, 최종 시험에서 guard를 통과하지 못한 경우, 통과하지 못한 트랙 C 판정, 감사의 치명 지적과 판단, 멈춘 이유가 들어간다.
+- 요약하지 않는다. 요약을 거듭하면 처음 내용이 흐려진다.
+- 실행마다 절 하나이고, `--resume`으로 다시 끝나면 그 절을 새로 쓴다.
+- 같은 프로젝트의 다음 실행에서 diverger와 critic이 읽는다. 사람이 열어 고치거나 지워도 된다.
 
 ### 마무리: push
 
@@ -354,7 +373,8 @@ prover(읽기 전용)가 증명을 쓰고 다른 벤더의 refuter(전체 허용
   "sota_baselines": [{ "id": "BASE_1", "name": "RBF SVM", "kind": "classical", "source": "..." }],
   "selected_candidates": [{
     "id": "D1_A", "title": "...", "mechanism": "...",
-    "quantum_rationale": "(트랙 A만)", "pilot_setup": "...", "rank_reason": "이 순서에 둔 근거 한 줄"
+    "quantum_rationale": "(양자 방법 후보만)", "pilot_setup": "...",
+    "kill_if": "이 결과가 나오면 버린다", "rank_reason": "이 순서에 둔 근거 한 줄"
   }],
   "dropped_candidates": [{ "id": "D2_A", "reason": "..." }]
 }
@@ -419,6 +439,7 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 ├── .autoresearch/runs/<run_id>/         # 실행 폴더의 명세와 providers.yaml 링크 (git에서 제외)
 └── research_runs/<run_id>/              # push로 들어온 결과 (브랜치 autoresearch/<run_id>)
 
+~/autoresearch_runs/<프로젝트>/lessons.md  # 실행 간 교훈 (버려진 것과 이유)
 ~/autoresearch_runs/<프로젝트>/<run_id>/   # 실행 폴더
 ├── 00_spec.md  providers.yaml  state.json  llm_logs/  venv/
 ├── hidden/                              # 정답 (final/은 트랙 A 최종 시험)
@@ -444,14 +465,14 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
   - 8개 모델 ID의 응답
   - 세 CLI의 읽기 전용 웹 검색과 세션 이어 쓰기(작은 호출)
   - 장난감 저장소에서 트랙 B 세 번, 트랙 A 한 번, 트랙 C 한 번, 사람이 붙은 시험 두 번
+  - 장난감 저장소(대칭 표본 몬테카를로)에서 세 벤더 교차 조사, 2회차 토론의 세 CLI 세션 이어 쓰기, 파일럿 관문, 트랙 A 시도 3회와 최종 시험(검증 입력 원상복구 포함), 트랙 C 2라운드와 반례 탐색 네 범주
 - **모의 실행으로만 확인한 것:** 모델 호출을 가짜로 바꾼 실행이다.
-  - 1:1 토론 여러 회차
-  - 교차 조사와 인용 확인 표
-  - 채점 설명과 보고서 검토
-  - 트랙 A 최종 시험과 트랙 B 최종 비교
-  - 치명 지적 알림
-  - 반례 탐색 범주
+  - 채점 설명과 보고서 검토, 보고서 수치 대조
+  - 트랙 B 최종 비교와 단순성 기준
+  - 치명 지적 알림과 비용 요약
+  - 실행 간 교훈 파일
   - `--resume`
+- **단위 시험으로 확인한 것:** DataCite 대체 조회, 실험 시간 상한(자식 프로세스까지 종료)
 - **읽기 전용 단계의 agy:** `--sandbox`만 주면 파일을 쓸 수 있고, 승인이 필요한 명령을 만나면 사람 없이 거부된 채 빈 답으로 끝난다. 그래서 명령과 파일 쓰기를 거부 규칙(`--settings`)으로 막는다. 이렇게 하면 agy가 거부를 받고도 답을 끝까지 쓴다(읽기와 웹 검색은 된다).
 
 ## 부록: Slack 알림

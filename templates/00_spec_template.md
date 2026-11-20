@@ -29,29 +29,34 @@ budget:                           # 쓰는 트랙의 항목만 있으면 된다.
                                   #   N이면 보완 요청이 남지 않을 때까지 최대 N회 주고받고, N회차 비평은 채택·탈락만 낸다.
                                   #   호출은 많아야 N × 2 × (diverger 수)회
   max_debate_rounds: 3            # (트랙 C) 증명-반박 라운드
-  run_limits: {fable: 5, codex: 3}  # (공통) 실행 1회당 호출 상한 (키: 모델 별명 또는 벤더). 닿으면 슬롯의 after_quota → 벤더 대체 모델
+  run_limits: {codex: 6}          # (공통) 실행 1회당 호출 상한 (키: 모델 별명 또는 벤더). 닿으면 슬롯의 after_quota → 벤더 대체 모델.
+                                  #   한도가 바닥나면 상한과 상관없이 대체 모델로 넘어간다. 한도가 작은 벤더만 적는다
   seeds: 3                        # (트랙 A) 시도마다 run.sh를 AR_SEED=0..seeds-1로 돌려 평균과 표준오차를 낸다
   bench_rounds: 3                 # (트랙 B) 수정 전과 수정 후를 번갈아 잴 횟수. 중앙값으로 비교한다
   call_timeout_min: null          # 모델 호출 한 번의 시간 제한(분). null이면 제한 없음
+  run_timeout_min: null           # (트랙 A/B) 실험 스크립트 1회의 시간 상한(분). 넘기면 끊고 비정상 종료로 처리. null이면 상한 없음
 stages:                           # 단계별 모델 배정. 쓰는 트랙의 단계는 모두 있어야 한다
                                   # 이 표에 벤더가 하나뿐이면 아래 '다른 벤더' 규칙을 '다른 모델'로 낮춰 적용한다
+                                  # 기본 배정: fable은 한 번만 부르는 결정적 단계, opus는 반복 루프와 글쓰기,
+                                  #   codex는 몇 번만 부르는 비평·반박·감사, agy는 대조와 검증(지어내지 않는 쪽이 강하다)
   phase1_recon:
     slots:                        # role마다 prompts/phase1_<role>.md
-      - {provider: claude, model: opus, effort: high, role: repo_scan}
-      - {provider: claude, model: opus, effort: xhigh, role: lit_search}   # 트랙 A·C: 세 벤더가 따로 조사한 것을 합치고
+      - {provider: claude, model: opus, effort: medium, role: repo_scan}
+      - {provider: claude, model: fable, effort: high, role: lit_search}   # 트랙 A·C: 세 벤더가 따로 조사한 것을 합치고
                                                                         #   검증한다. 트랙 B: 혼자 조사한다
   phase2_ideation:
     divergers:                    # 아이디어를 내는 모델. 같은 모델을 여러 줄 넣을 때는 lens: "통계물리 관점"처럼 관점을 붙인다
       - {provider: claude, model: fable, effort: high}
       - {provider: claude, model: opus, effort: xhigh}
-      - {provider: agy, model: neon, effort: xhigh}
+      - {provider: agy, model: neon, effort: high}
     critics:                      # diverger마다 한 명씩 1:1로 짝지어 토론한다. 다른 벤더를 먼저 짝짓는다.
-      - {provider: agy, model: neon, effort: xhigh}    # critic이 채택·탈락을 정하므로 diverger보다 약하지 않게 둔다
-      - {provider: codex, model: sol, effort: xhigh}
-    selector: {provider: claude, model: opus, effort: xhigh}
+      - {provider: codex, model: astra, effort: high}  # critic이 채택·탈락을 정하므로 diverger보다 약하지 않게 둔다
+      - {provider: agy, model: neon, effort: xhigh}
+      - {provider: claude, model: opus, effort: xhigh}
+    selector: {provider: claude, model: fable, effort: high}
   phase3_pilot:
-    builder: {provider: claude, model: opus, effort: xhigh}   # 채점 코드를 쓴다. 틀리면 뒤 단계가 모두 틀리므로 강하게 둔다
-    explainer: {provider: agy, model: neon, effort: high}    # 파일럿 관문에서 채점 코드가 하는 일을 자연어로 설명. builder와 다른 벤더 권장
+    builder: {provider: claude, model: fable, effort: high}   # 채점 코드를 쓴다. 틀리면 뒤 단계가 모두 틀리므로 강하게 둔다
+    explainer: {provider: agy, model: neon, effort: medium}  # 파일럿 관문에서 채점 코드가 하는 일을 자연어로 설명. builder와 다른 벤더 권장
   crash_repair: {provider: claude, model: opus, effort: high}
   phase4_track_a:
     experimenter: {provider: claude, model: opus, effort: xhigh}
@@ -59,15 +64,15 @@ stages:                           # 단계별 모델 배정. 쓰는 트랙의 �
     worker: {provider: claude, model: opus, effort: high}
     unstuck_peer: {provider: agy, model: neon, effort: xhigh}
   phase4_track_c:
-    prover: {provider: claude, model: fable, effort: xhigh,
-             after_quota: {provider: claude, model: opus, effort: max}}
+    prover: {provider: claude, model: fable, effort: high,
+             after_quota: {provider: claude, model: opus, effort: xhigh}}
     refuter: {provider: codex, model: astra, effort: high,
               after_quota: {provider: agy, model: neon, effort: xhigh}}
   phase5_audit:
     auditors:                     # 본 실험(Phase 4) 주력 모델과 다른 벤더만
       - {provider: agy, model: neon, effort: high}
-      - {provider: codex, model: sol, effort: high}
-    reporter: {provider: claude, model: opus, effort: high}
+      - {provider: codex, model: astra, effort: high}
+    reporter: {provider: claude, model: opus, effort: xhigh}
     checker: {provider: agy, model: neon, effort: high}      # 보고서의 수치·결론을 결과 파일과 대조해 틀린 문장만 고친다. reporter와 다른 벤더
 falsification:
   pilot_check: "<파일럿에서 볼 최소 신호: 단순 기준선 대비 차이, 수치 발산 없음 등>"

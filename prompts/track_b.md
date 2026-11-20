@@ -7,7 +7,7 @@
 {{selected}}
 
 현재 최고 커밋: {{best_commit}}
-현재 최고 metric: {{best_metric}} ({{direction}}). 채택되려면 guard를 통과하고 {{min_pct}}% 이상 좋아져야 한다.
+현재 최고 metric: {{best_metric}} ({{direction}}). 채택되려면 guard를 통과하고 {{min_pct}}% 이상 좋아져야 한다. 지표가 ±{{min_pct}}% 안에서 같아도 코드 줄 수가 줄면 채택된다(같은 성능이면 단순한 코드가 낫다). 개선이 작은데 코드를 크게 늘리는 수정은 피한다.
 빌드 명령: {{build_cmd}}
 
 지금까지의 results.tsv (끝부분):
