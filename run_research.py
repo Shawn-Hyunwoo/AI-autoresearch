@@ -110,7 +110,7 @@ for i in range(4):   # 명세가 쓰는 CLI가 있는가. 자동 업데이트 �
     print(f"CLI를 찾지 못함: {', '.join(missing)}. 15초 뒤 다시 확인 (자동 업데이트 중일 수 있음)", flush=True)
     time.sleep(15)
 BAD += [f"{k}: CLI({PROV['vendors'][k]['cmd'][0]})를 찾지 못함. 설치하거나 명세에서 이 벤더를 뺀다" for k in missing]
-for k in USED:   # 한도 초과 때 넘어갈 곳이 명세가 쓰지 않는 벤더면, 쓰는 다른 벤더(없으면 자기)의 사다리 맨 위로 바꾼다
+for k in USED:   # 한도 초과 때 넘어갈 곳이 명세가 쓰지 않는 벤더면, 쓰는 다른 벤더(없으면 자기)의 강한 순서 목록에서 가장 강한 모델로 바꾼다
     v, fb = PROV["vendors"][k], PROV["vendors"][k].get("fallback_on_quota") or {}
     if fb.get("provider") not in USED:
         alt = next((o for o in USED if o != k), k)
@@ -279,7 +279,7 @@ def sha256(p):
 
 
 def slot(key, default):
-    # 승격된 슬롯은 state에 남겨 --resume 뒤에도 이어 쓴다
+    # 더 강한 모델로 바꾼 슬롯은 state에 남겨 --resume 뒤에도 이어 쓴다
     return STATE["slots"].get(key, default)
 
 
@@ -995,7 +995,7 @@ def phase_track_ab(track):
             row(it, STATE["best_commit"][:9] if keep else "-", status, s, delta, summary)
         with open(notes, "a") as f:
             f.write(f"- {track} iter {it} [{status}] {summary}\n")
-        if T["stale"] >= 2:                              # 두 번 연속 실패나 정체: 한 칸 승격 + (B) 다른 계열 자문
+        if T["stale"] >= 2:                              # 두 번 연속 실패나 정체: 더 강한 모델로 바꾸고, (B) 다른 계열 자문
             STATE["slots"][f"{track}_{role}"] = llm.escalate(cur)
             if track == "B" and st.get("unstuck_peer"):
                 T["advice"] = agent("B_unstuck", st["unstuck_peer"], prompt(

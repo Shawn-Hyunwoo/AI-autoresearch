@@ -1,5 +1,5 @@
 # 세 CLI(claude, agy, codex)를 비대화형으로 부르는 라우터.
-# 안전 수칙을 프롬프트 앞뒤에 붙이고, 실행당 호출 상한·한도 초과 대체를 처리한다. 승격(escalate)은 본 실험 정체 때 제어기가 부른다.
+# 안전 수칙을 프롬프트 앞뒤에 붙이고, 실행당 호출 상한·한도 초과 대체를 처리한다. 더 강한 모델로 바꾸기(escalate)는 본 실험이 막혔을 때 제어기가 부른다.
 import json
 import os
 import re
@@ -63,7 +63,7 @@ def resolve(slot):
         if not _limited(slot):
             break
         slot = slot.get("after_quota") or P["vendors"][slot["provider"]]["fallback_on_quota"]
-    if _limited(slot):   # 대체 모델도 막혔으면 그 벤더의 승격 사다리에서 막히지 않은 가장 높은 칸 (벤더 하나만 쓸 때 필요)
+    if _limited(slot):   # 대체 모델도 막혔으면 그 벤더의 강한 순서 목록에서 한도가 남은 가장 강한 모델 (벤더 하나만 쓸 때 필요)
         steps = [{"provider": slot["provider"], **s} for s in P["vendors"][slot["provider"]].get("escalation_ladder") or []]
         slot = next((s for s in reversed(steps) if not _limited(s)), slot)
     if _limited(slot):
@@ -78,7 +78,7 @@ def resolve(slot):
 
 
 def escalate(slot):
-    # 승격 사다리에서 한 칸 위. 사다리 밖의 슬롯은 추론 단계만 한 칸 올린다.
+    # 강한 순서 목록에서 다음 모델. 목록에 없는 슬롯은 추론 단계만 한 단계 올린다.
     v = P["vendors"][slot["provider"]]
     steps = [(s["model"], s["effort"]) for s in v.get("escalation_ladder", [])]
     key = (slot["model"], slot["effort"])

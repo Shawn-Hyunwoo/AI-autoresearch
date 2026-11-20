@@ -1,4 +1,6 @@
-# 벤더를 어떻게 부르는지만 둔다: 모델 ID, CLI 플래그, 승격 순서, 대체 모델, 한도 초과 문구.
+# 벤더를 어떻게 부르는지만 둔다: 모델 ID, CLI 플래그, 강한 순서 모델 목록, 대체 모델, 한도 초과 문구.
+# escalation_ladder: 약한 것부터 강한 순서의 모델 목록. 본 실험이 두 번 연속 실패하면 다음 모델로 바꾸고,
+# 한도 초과 대체 모델까지 막히면 이 목록에서 한도가 남은 가장 강한 모델을 쓴다.
 # 무엇을 얼마나 부를지(단계별 배정, 호출 상한)는 실행 명세 00_spec.md에만 있다. 모델 버전 문자열은 aliases에서만 바꾼다.
 # cmd 자리표시자: {model} {effort} {out}. full_flags는 코드 수정 단계, readonly_flags는 조사·비평·감사 단계에 붙는다.
 # 2026-11-19 서버 실측: 아래 8개 ID 모두 "reply ok" 응답 확인. agy는 stdin을 읽지 않아 -p=<프롬프트> 인자로 넘긴다.
@@ -19,7 +21,7 @@ vendors:
     prompt_via: stdin
     session: {id: uuid, new: ["--session-id", "{session}"], resume: ["--resume", "{session}"]}
     search: {model: fable, effort: medium}
-    escalation_ladder:                            # opus max는 fable high보다 느리고 약해 사다리에서 뺐다
+    escalation_ladder:                            # opus max는 fable high보다 느리고 약해 목록에서 뺐다
       - {model: opus, effort: high}
       - {model: opus, effort: xhigh}
       - {model: fable, effort: high}

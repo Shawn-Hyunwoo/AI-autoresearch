@@ -35,9 +35,9 @@
 ```
 ~/autoresearch/                 이 레포를 여기에 클론
 ├── run_research.py             제어기. 단계를 돌리고, 실험을 실행·채점하고, 관문에서 기다림
-├── llm_router.py               세 CLI 호출, 안전 수칙 주입, 호출 상한·대체·승격
+├── llm_router.py               세 CLI 호출, 안전 수칙 주입, 호출 상한, 대체 모델, 더 강한 모델로 바꾸기
 ├── notify.py                   Slack 알림 (선택)
-├── providers.yaml              벤더를 "어떻게" 부르는지: 모델 ID, CLI 플래그, 승격 순서, 대체 모델
+├── providers.yaml              벤더를 "어떻게" 부르는지: 모델 ID, CLI 플래그, 강한 순서 모델 목록, 대체 모델
 ├── prompts/                    단계별 지침
 ├── templates/00_spec_template.md   명세 틀 (기본 모델 배정과 호출 상한 포함)
 ├── commands/research-spec.md   Phase 0 명령 → ~/.claude/commands/ 에 심볼릭 링크
