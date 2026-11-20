@@ -16,8 +16,8 @@
    {"guard_pass": true, "guard_reason": "...", "primary_metric": 0.0, "direction": "higher_is_better|lower_is_better", "wall_time_sec": null, "secondary_metrics": {}}
    기준 정답은 `os.environ["AR_HIDDEN_DIR"]`에서 읽는다. 모델 초기화, 학습, 알고리즘 실행은 하지 않는다. 트랙 A면 결과에 평가 대상의 id를 함께 쓰게 하고, 결과의 id가 정답의 id와 다르면 guard 실패로 처리한다(최종 시험에서 실험 코드가 다른 입력을 읽거나 저장해 둔 결과를 돌려주면 여기서 걸린다).
 3. {{eval_dir}}/test_gate.py: 기준 정답은 `AR_HIDDEN_DIR`에서 읽는다. 세 가지를 검사하고 모두 통과하면 exit 0, 하나라도 실패하면 exit 1. (a) 작은 정답 결과를 통과시킨다 (b) 일부러 만든 불량 결과를 기각한다 (c) SoTA 기준선 하나를 재현한다.
-4. 트랙 B가 포함되면 {{eval_dir}}/run_bench.sh: `bash run_bench.sh <result_dir>`로 실행되어, 작은 규모의 정확도(guard) 세트와 중대규모의 속도·메모리(metric) 세트를 차례로 돌려 result_dir에 결과를 쓴다. 이 파일은 잠기고, 이후에는 소스 코드만 바뀐다. 호출 사이에 남은 캐시 때문에 시간이 실제보다 짧게 재지지 않게 한다: 워밍업은 측정 입력과 다른 입력으로 하고, 측정 입력으로는 한 번만 부른다. 같은 프로세스에서 같은 입력을 두 번 불러 두 번째 시간을 재지 않는다.
-5. 트랙 A가 포함되면 선별된 후보와 SoTA 기준선마다 {{pilot_dir}}/<id>/run.sh: `bash run.sh <result_dir>`로 실행되어 main 입력에서 가장 작은 규모로 돌고 result_dir에 metrics.py가 읽을 결과를 쓴다. 난수는 환경변수 `AR_SEED`(정수)를 시드로 쓴다. run.sh와 실험 코드는 AR_HIDDEN_DIR을 읽지 않는다. 실험 코드는 되도록 저장소 안에 새 모듈로 둔다.
+4. 트랙 B가 포함되면 {{eval_dir}}/run_bench.sh: `bash run_bench.sh <result_dir>`로 실행되어, 정확도(guard) 세트(작은 입력 몇 개)와 속도·메모리(metric) 세트(이 기계에서 한 번 측정에 10초 이상 걸리는 크기. 측정 시간이 짧으면 잡음이 개선 폭보다 커진다)를 차례로 돌려 result_dir에 결과를 쓴다. 이 파일은 잠기고, 이후에는 소스 코드만 바뀐다. 호출 사이에 남은 캐시 때문에 시간이 실제보다 짧게 재지지 않게 한다: 워밍업은 측정 입력과 다른 입력으로 하고, 측정 입력으로는 한 번만 부른다. 같은 프로세스에서 같은 입력을 두 번 불러 두 번째 시간을 재지 않는다.
+5. 트랙 A가 포함되면 선별된 후보와 SoTA 기준선마다 {{pilot_dir}}/<id>/run.sh: `bash run.sh <result_dir>`로 실행되어 main 입력에서 가장 작은 경우(가장 작은 입력이나 가장 작은 모델 설정, 시드 하나)로 돌고 result_dir에 metrics.py가 읽을 결과를 쓴다. 난수는 환경변수 `AR_SEED`(정수)를 시드로 쓴다. run.sh와 실험 코드는 AR_HIDDEN_DIR을 읽지 않는다. 실험 코드는 되도록 저장소 안에 새 모듈로 둔다.
 
 주석: prepare.py, metrics.py, test_gate.py(트랙 B면 run_bench.sh)에는 코드 블록마다 무엇을 하는지 한 줄 주석을 단다(예: `# guard: 모든 예측이 0 또는 1이고 표본 수가 같다`, `# metric: 테스트 정확도 = 맞힌 수 / 전체`). 여러 줄 설명은 쓰지 않는다. 사람이 파일럿 관문에서 이 코드를 보고 승인하므로, 주석만 읽어도 무엇을 채점하는지 알 수 있게 쓴다. metrics.py의 50줄에는 주석과 빈 줄을 세지 않는다.
 
