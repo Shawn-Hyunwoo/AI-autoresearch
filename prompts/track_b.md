@@ -1,6 +1,6 @@
 트랙 B(코드·알고리즘 최적화), 시도 {{iter}}/{{max_iter}}. 너는 이전 대화를 모른다. 아래 요약만 믿는다.
 
-연구 명세 (guard는 깨지면 안 되는 조건, metric은 개선 목표):
+연구 계획서 (guard는 깨지면 안 되는 조건, metric은 개선 목표):
 {{spec}}
 
 선별된 후보 (Phase 2의 02_selected.json):

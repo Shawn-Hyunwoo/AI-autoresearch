@@ -47,7 +47,7 @@ BRANCH = f"autoresearch/{RUN_ID}"
 STATE_PATH = RUN / "state.json"             # 클론 밖에 둔다
 PY = str(VENV / "bin" / "python")
 
-# ---- 명세와 설정: 벤더를 어떻게 부르는지는 providers.yaml, 무엇을 얼마나 부를지는 명세에만 있다 (겹치지 않음)
+# ---- 계획서와 설정: 벤더를 어떻게 부르는지는 providers.yaml, 무엇을 얼마나 부를지는 계획서에만 있다 (겹치지 않음)
 SPEC_TEXT = SPEC_PATH.read_text()
 CFG = yaml.safe_load(re.search(r"```yaml\n(.*?)\n```", SPEC_TEXT, re.S).group(1))
 SRC = Path(CFG["source_repo"]).expanduser().resolve()
@@ -64,13 +64,13 @@ NEED_BUDGET = ["max_crash_repairs", "run_limits"] + (["max_iterations"] if {"A",
     + (["max_debate_rounds"] if "C" in TRACKS else [])   # 쓰는 트랙에 필요한 항목만 요구한다
 MISSING = [f"stages.{k}" for k in NEED if k not in STAGES] + [f"budget.{k}" for k in NEED_BUDGET if k not in BUDGET]
 if MISSING:
-    raise SystemExit(f"명세에 빠진 항목: {', '.join(MISSING)} (templates/00_spec_template.md 참고)")
+    raise SystemExit(f"계획서에 빠진 항목: {', '.join(MISSING)} (templates/00_spec_template.md 참고)")
 if not STAGES["phase2_ideation"].get("critics"):
     raise SystemExit("stages.phase2_ideation.critics가 비어 있습니다 (diverger마다 critic 한 명과 토론합니다)")
 
 
 def slots_in(x, path="stages"):
-    # 명세 stages 안의 모든 모델 슬롯 (after_quota 포함)
+    # 계획서 stages 안의 모든 모델 슬롯 (after_quota 포함)
     if isinstance(x, dict):
         if "provider" in x:
             yield path, x
@@ -81,16 +81,16 @@ def slots_in(x, path="stages"):
             yield from slots_in(v, f"{path}[{i}]")
 
 
-# 명세가 쓰는 벤더를 사용자가 쓸 수 있는 벤더로 본다(CLI가 깔려 있어도 구독하지 않은 벤더는 명세에 넣지 않는다).
+# 계획서가 쓰는 벤더를 사용자가 쓸 수 있는 벤더로 본다(CLI가 깔려 있어도 구독하지 않은 벤더는 계획서에 넣지 않는다).
 # 하나뿐이면 분리 규칙을 벤더 대신 모델 단위로 지키고, 한도 초과 대체와 교차 조사도 이 벤더들 안에서만 한다
 USED = sorted({s["provider"] for _, s in slots_in(STAGES) if s.get("provider") in PROV["vendors"]})
 SOLO = len(USED) == 1
 UNIT = "모델" if SOLO else "벤더"
-ADAPT = [f"명세가 쓰는 벤더가 {USED[0]} 하나라 교차 검토를 다른 벤더 대신 다른 모델로 했다 (독립성이 약하다)"] if SOLO else []
+ADAPT = [f"계획서가 쓰는 벤더가 {USED[0]} 하나라 교차 검토를 다른 벤더 대신 다른 모델로 했다 (독립성이 약하다)"] if SOLO else []
 
 
 def kin(s):
-    # 분리 규칙의 단위: 벤더. 명세가 쓰는 벤더가 하나뿐이면 모델
+    # 분리 규칙의 단위: 벤더. 계획서가 쓰는 벤더가 하나뿐이면 모델
     return (s["provider"], s["model"]) if SOLO else s["provider"]
 
 
@@ -103,21 +103,21 @@ for where, s in slots_in(STAGES):
         BAD.append(f"{where}: {s['provider']}에 없는 모델 '{s.get('model')}' (있는 것: {', '.join(v['aliases'])})")
     elif s.get("effort") not in v["efforts"]:
         BAD.append(f"{where}: {s['provider']}에 없는 추론 단계 '{s.get('effort')}' (있는 것: {', '.join(v['efforts'])})")
-for i in range(4):   # 명세가 쓰는 CLI가 있는가. 자동 업데이트 중에는 실행 파일이 잠깐 없으므로 몇 번 다시 본다
+for i in range(4):   # 계획서가 쓰는 CLI가 있는가. 자동 업데이트 중에는 실행 파일이 잠깐 없으므로 몇 번 다시 본다
     missing = [k for k in USED if not shutil.which(PROV["vendors"][k]["cmd"][0])]
     if not missing or i == 3:
         break
     print(f"CLI를 찾지 못함: {', '.join(missing)}. 15초 뒤 다시 확인 (자동 업데이트 중일 수 있음)", flush=True)
     time.sleep(15)
-BAD += [f"{k}: CLI({PROV['vendors'][k]['cmd'][0]})를 찾지 못함. 설치하거나 명세에서 이 벤더를 뺀다" for k in missing]
-for k in USED:   # 한도 초과 때 넘어갈 곳이 명세가 쓰지 않는 벤더면, 쓰는 다른 벤더(없으면 자기)의 강한 순서 목록에서 가장 강한 모델로 바꾼다
+BAD += [f"{k}: CLI({PROV['vendors'][k]['cmd'][0]})를 찾지 못함. 설치하거나 계획서에서 이 벤더를 뺀다" for k in missing]
+for k in USED:   # 한도 초과 때 넘어갈 곳이 계획서가 쓰지 않는 벤더면, 쓰는 다른 벤더(없으면 자기)의 강한 순서 목록에서 가장 강한 모델로 바꾼다
     v, fb = PROV["vendors"][k], PROV["vendors"][k].get("fallback_on_quota") or {}
     if fb.get("provider") not in USED:
         alt = next((o for o in USED if o != k), k)
         a = PROV["vendors"][alt]
         v["fallback_on_quota"] = fb = {"provider": alt, **(a.get("escalation_ladder") or [
             {"model": next(iter(a["aliases"])), "effort": a["efforts"][-1]}])[-1]}
-        ADAPT.append(f"{k}의 한도 초과 대체를 명세가 쓰지 않는 벤더에서 {alt}/{fb['model']}/{fb['effort']}로 바꿨다")
+        ADAPT.append(f"{k}의 한도 초과 대체를 계획서가 쓰지 않는 벤더에서 {alt}/{fb['model']}/{fb['effort']}로 바꿨다")
     f = PROV["vendors"][fb["provider"]]
     if fb.get("model") not in f["aliases"] or fb.get("effort") not in f["efforts"]:
         BAD.append(f"{PROV_PATH.name} vendors.{k}.fallback_on_quota: 없는 모델이나 추론 단계 {fb}")
@@ -126,7 +126,7 @@ for k in USED:   # 한도 초과 때 넘어갈 곳이 명세가 쓰지 않는 �
 if {"A", "C"} & set(TRACKS) and not any(s.get("role") == "lit_search" for s in STAGES["phase1_recon"]["slots"]):
     BAD.append("stages.phase1_recon.slots: 트랙 A·C에는 교차 조사를 합치고 검증할 role: lit_search 슬롯이 필요합니다")
 if BAD:
-    raise SystemExit(f"명세의 모델 배정과 {PROV_PATH.name}를 확인하세요:\n" + "\n".join(BAD))
+    raise SystemExit(f"계획서의 모델 배정과 {PROV_PATH.name}를 확인하세요:\n" + "\n".join(BAD))
 AUDIT = STAGES["phase5_audit"]
 if AUDIT.get("checker") and kin(AUDIT["checker"]) == kin(AUDIT["reporter"]):
     raise SystemExit(f"phase5_audit의 checker(보고서 검토)와 reporter는 서로 다른 {UNIT}로 둬야 합니다")
@@ -195,7 +195,7 @@ llm.setup(PROV, LIMITS, STATE, save_state, {
 
 # ---- 공통 도구
 class Stop(Exception):
-    # 오류가 아닌 멈춤: 파일럿 신호 없음, 트랙 C 기각, push 관문 등.
+    # 오류가 아닌 멈춤: 파일럿 신호 없음, 트랙 C 기각, push 거절 등.
     # by_user=True는 사람이 tmux에서 직접 고른 멈춤(q, push 거절)이라 Slack으로 다시 알리지 않는다
     def __init__(self, msg, by_user=False):
         super().__init__(msg)
@@ -208,7 +208,7 @@ def say(msg):
 
 
 def ask(prompt):
-    # 관문 입력. readline을 켜면 방향키·Home·End·Delete가 키 코드로 들어가지 않고 줄 편집으로 동작한다.
+    # 확인 단계 입력. readline을 켜면 방향키·Home·End·Delete가 키 코드로 들어가지 않고 줄 편집으로 동작한다.
     # 그래도 키 코드(ESC로 시작: 방향키, Ctrl/Shift+방향키, PgUp/PgDn, F키, Alt+키 등)나 제어 문자가 남으면 다시 묻는다.
     try:
         import readline  # noqa: F401
@@ -222,7 +222,7 @@ def ask(prompt):
             except EOFError:
                 raise Stop("입력을 받을 수 없음(tmux 밖 실행). tmux에서 --resume으로 이어서 실행")
             except KeyboardInterrupt:
-                raise Stop("관문에서 Ctrl-C로 멈춤. 이어 하려면 --resume", by_user=True)
+                raise Stop("확인 단계에서 Ctrl-C로 멈춤. 이어 하려면 --resume", by_user=True)
             a = a.replace("\x1b[200~", "").replace("\x1b[201~", "").replace("\t", " ").strip()   # 붙여넣기 표시, 탭
             if any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 for c in a):
                 print("방향키 같은 키 코드가 섞여 있어 받지 않았습니다. 다시 입력하세요. "
@@ -235,7 +235,7 @@ def ask(prompt):
 
 def sh(cmd, cwd=REPO, check=True, env=None):
     r = subprocess.run(cmd, cwd=cwd, env=env or ENV, capture_output=True, text=True, shell=isinstance(cmd, str),
-                       stdin=subprocess.DEVNULL)    # 관문 입력(tmux)을 자식 프로세스가 가져가지 않게
+                       stdin=subprocess.DEVNULL)    # 확인 단계 입력(tmux)을 자식 프로세스가 가져가지 않게
     if check and r.returncode:
         raise RuntimeError(f"명령 실패 rc={r.returncode}: {cmd}\n{r.stderr[-2000:]}")
     return r
@@ -596,7 +596,7 @@ def phase_workspace():
 # 트랙 A·C는 search가 있는 벤더들이 같은 주제를 따로 조사하고(교차 조사), lit_search 슬롯의 모델이 합치고 검증한다.
 # 트랙 B만이면 lit_search 한 번으로 끝낸다
 def references():
-    # 명세 references: 사용자가 준 참고 자료. 경로면 클론의 .ar_refs/에 복사하고(git에서 제외되어 push되지 않음),
+    # 계획서 references: 사용자가 준 참고 자료. 경로면 클론의 .ar_refs/에 복사하고(git에서 제외되어 push되지 않음),
     # 경로가 아니면(URL, 논문 제목 등) 글 그대로 넘긴다
     refs, out = CFG.get("references") or [], []
     ex = REPO / ".git" / "info" / "exclude"
@@ -695,7 +695,7 @@ def phase_recon():
 # ---- Phase 2: 아이디어 토론 → 선별. diverger마다 critic 한 명과 1:1로 최대 max_ideation_rounds회 주고받고,
 # 보완 요청이 남지 않으면 그 토론은 끝난다. 통과 후보가 없으면 탈락 사유를 알리고 멈춘다
 def pair_critics(divs, crits):
-    # diverger마다 critic 한 명. 다른 벤더(명세가 쓰는 벤더가 하나뿐이면 다른 모델) critic을 우선하고, 덜 배정된 critic을 고른다
+    # diverger마다 critic 한 명. 다른 벤더(계획서가 쓰는 벤더가 하나뿐이면 다른 모델) critic을 우선하고, 덜 배정된 critic을 고른다
     used, out = [0] * len(crits), []
     for dv in divs:
         js = [j for j, c in enumerate(crits) if kin(c) != kin(dv)] or list(range(len(crits)))
@@ -728,8 +728,8 @@ def write_lessons():
               for x in json.loads(read(OUT / "05_audit" / "fatal.json") or "{}").get("items") or []]
     if STATE["status"] == "STOPPED" and STATE["phase"] != "final":
         lines.append(f"- 멈춤 ({STATE['phase']}): {STATE.get('stop_reason', '')[:300]}")
-    title = next((re.sub(r"^연구 명세:\s*", "", ln[2:].strip()) for ln in SPEC_TEXT.splitlines() if ln.startswith("# ")), "")
-    block = f"## {RUN_ID} (트랙 {TRACKS[0]}, {STATE['status']})\n- 명세: {title}\n" + "\n".join(lines or ["- 버려진 것 없음"])
+    title = next((re.sub(r"^연구 (?:명세|계획서):\s*", "", ln[2:].strip()) for ln in SPEC_TEXT.splitlines() if ln.startswith("# ")), "")
+    block = f"## {RUN_ID} (트랙 {TRACKS[0]}, {STATE['status']})\n- 계획서: {title}\n" + "\n".join(lines or ["- 버려진 것 없음"])
     old = re.sub(rf"^## {re.escape(RUN_ID)} .*?(?=^## |\Z)", "", read(LESSONS), flags=re.S | re.M).strip()
     LESSONS.write_text((old + "\n\n" if old else "") + block + "\n")
 
@@ -774,15 +774,15 @@ def debate_log(t, d, rounds):
 
 
 def phase_known_c():
-    # 트랙 C: 조사가 명세의 정리를 이미 증명됐거나 반증됐다고 판정하면, 토론과 증명에 들어가기 전에 사람에게 묻는다
-    m = re.search(r"^##\s*명세의 정리는 이미 알려져 있는가\s*\n+(.+?)(?=^##?\s|\Z)", read(OUT / "01_recon.md"), re.S | re.M)
+    # 트랙 C: 조사가 계획서의 정리를 이미 증명됐거나 반증됐다고 판정하면, 토론과 증명에 들어가기 전에 사람에게 묻는다
+    m = re.search(r"^##\s*(?:명세|계획서)의 정리는 이미 알려져 있는가\s*\n+(.+?)(?=^##?\s|\Z)", read(OUT / "01_recon.md"), re.S | re.M)
     body = m[1].strip() if m else ""
     if not body.lstrip("*- ").startswith(("이미 증명됨", "반증됨")):
         return
-    say(f"[{RUN_ID}] 트랙 C: 문헌 조사에서 명세의 정리가 이미 알려진 결과로 나왔습니다.\n\n{body[:800]}\n\n"
+    say(f"[{RUN_ID}] 트랙 C: 문헌 조사에서 계획서의 정리가 이미 알려진 결과로 나왔습니다.\n\n{body[:800]}\n\n"
         f"전문: {OUT / '01_recon.md'}\n계속하면 이 정리 대신 더 일반적이거나 강한 변형을 후보로 냅니다.")
     if ask("Enter: 변형으로 계속 | q: 종료 > ").lower() == "q":
-        raise Stop("명세의 정리가 이미 알려진 결과라 사용자가 종료", by_user=True)
+        raise Stop("계획서의 정리가 이미 알려진 결과라 사용자가 종료", by_user=True)
 
 
 def phase_ideation():
@@ -809,7 +809,7 @@ def phase_ideation():
     _, sel = agent_json("selector", st["selector"], prompt("phase2_select.md", spec=SPEC_TEXT, recon=recon, debates=logs),
                         d / "selector.md", "readonly", parse_selection, SELECT_SCHEMA)
     (d / "02_selected.json").write_text(json.dumps(sel, ensure_ascii=False, indent=2))
-    if not sel.get("selected_candidates"):   # 토론을 처음부터 다시 하지 않는다. 사유를 보고 명세를 고쳐 새로 실행한다
+    if not sel.get("selected_candidates"):   # 토론을 처음부터 다시 하지 않는다. 사유를 보고 계획서를 고쳐 새로 실행한다
         raise Stop("통과 후보 0개. 탈락 사유:\n" + "\n".join(
             f"- {c.get('id')}: {c.get('reason', '')}" for c in sel.get("dropped_candidates") or []))
 
@@ -877,8 +877,8 @@ def phase_pilot():
 
 
 def explain_scoring():
-    # 채점 코드가 실제로 하는 일을 다른 모델이 읽고 자연어로 설명한다. 사람이 코드를 읽지 않고 관문에서 확인하도록.
-    # explainer가 명세에 없으면 metrics.py 원문을 보여 준다. 채점 코드가 바뀌었을 때만 다시 부른다
+    # 채점 코드가 실제로 하는 일을 다른 모델이 읽고 자연어로 설명한다. 사람이 코드를 읽지 않고 확인 단계에서 판단하도록.
+    # explainer가 계획서에 없으면 metrics.py 원문을 보여 준다. 채점 코드가 바뀌었을 때만 다시 부른다
     ex, out = STAGES["phase3_pilot"].get("explainer"), OUT / "03_pilot" / "scoring_explained.md"
     if not ex:
         return f"metrics.py\n```\n{read(EVAL / 'metrics.py')}\n```"
@@ -1127,7 +1127,7 @@ def run_hunter(rd):
 
 
 def summary_of(text):
-    # 증명·반박 글의 '## 요약' 절 (사람이 관문에서 읽는 부분). 판정 JSON 줄은 뺀다. 없으면 None
+    # 증명·반박 글의 '## 요약' 절 (사람이 확인 단계에서 읽는 부분). 판정 JSON 줄은 뺀다. 없으면 None
     m = re.search(r"^##\s*요약\s*\n(.*?)(?=^##\s|\Z)", text or "", re.S | re.M)
     return "\n".join(ln for ln in m[1].strip().splitlines() if not ln.lstrip().startswith("{")).strip() if m else None
 
@@ -1395,7 +1395,7 @@ def phase_final():
     (RUN / "final.index").unlink()
     problems = push_gate(final)
     if problems:
-        raise Stop("push 관문에서 걸림 (절대경로·호스트명·토큰 꼴·큰 파일). 클론에서 고친 뒤 --resume\n" + "\n".join(problems[:50]),
+        raise Stop("push 전 검사에서 걸림 (절대경로·호스트명·토큰 꼴·큰 파일). 클론에서 고친 뒤 --resume\n" + "\n".join(problems[:50]),
                    by_user=True)   # push 확인 직후라 사람이 화면 앞에 있다. Slack으로 다시 보내지 않는다
     remote = CFG.get("push_remote", "origin")
     ok, why = remote_is_private(remote)

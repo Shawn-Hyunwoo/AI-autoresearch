@@ -21,7 +21,7 @@
 이 도구에 없는 것:
 - **fork-and-flush** (`references/fork-and-flush.md`)
   - 시도 예산의 1/3과 2/3 지점에서 한 번씩 돈다. 5회 연속 채택이 없으면 그보다 일찍 돈다.
-  - 최고 커밋을 표시해 두고 새 에이전트 4개를 각자 worktree에서 띄운다. 이들은 명세, `results.tsv`, git log만 받고 리더의 가설은 받지 않는다.
+  - 최고 커밋을 표시해 두고 새 에이전트 4개를 각자 worktree에서 띄운다. 이들은 계획서, `results.tsv`, git log만 받고 리더의 가설은 받지 않는다.
   - 절반은 지시 없이 자유롭게, 절반은 기록에 없는 실험을 하나씩 배정받아 시도한다. 이긴 가지가 다음 리더가 된다.
   - 구조.
 - **위험 명령 차단 훅** (`.claude/hooks/autoresearch/dangerous-cmd-block.cjs`, `scout-block.cjs`, `privacy-block.cjs`)
@@ -54,7 +54,7 @@
   - full-auto, gate-only, checkpoint, step-by-step, co-pilot, custom이 있다. 단계마다 정책 필드가 11개다.
   - 품질 점수가 0.7 아래면 멈추는 기능(`hitl/smart_pause.py`)이 있다.
   - 비용이 예산의 50, 80, 100%에 닿으면 멈추는 기능(`hitl/cost_guard.py`)이 있다.
-  - 관문에 답이 없으면 Slack이나 메일로 다시 알린다(`hitl/escalation.py`).
+  - 확인 단계에 답이 없으면 Slack이나 메일로 다시 알린다(`hitl/escalation.py`).
   - 구조.
 - **교훈 축적** (`researchclaw/evolution.py`, `metaclaw_bridge/lesson_to_skill.py`)
   - 실패한 단계, 방향 전환, NaN 경고 같은 사건을 JSONL 한 줄(단계, 분류, 심각도, 300자 설명)로 남긴다.
@@ -124,17 +124,17 @@
 | 기법 | 출처 | 고칠 위치 | 작업량 | 종류 | 얻는 것 |
 |---|---|---|---|---|---|
 | Crossref에 없는 DOI를 DataCite에서 다시 조회 | AutoResearchClaw, K-Dense | `run_research.py` `check_citations` | 소 | 구조 | arXiv DOI를 "없음"으로 잘못 표시하던 결함이 사라진다 |
-| 실험 1회 시간 상한 (`budget.run_timeout_min`, 선택) | karpathy | `run_research.py` `run_case`(실행 호출에 timeout), 명세 템플릿 | 소 | 구조 | 실험 하나가 멈춰도 실행 전체가 서지 않고 crash로 넘어간다 |
+| 실험 1회 시간 상한 (`budget.run_timeout_min`, 선택) | karpathy | `run_research.py` `run_case`(실행 호출에 timeout), 계획서 템플릿 | 소 | 구조 | 실험 하나가 멈춰도 실행 전체가 서지 않고 crash로 넘어간다 |
 | 보고서 수치를 결과 파일 수치 목록과 대조해, 목록에 없는 수치를 checker에게 넘김 | AutoResearchClaw | `run_research.py` `check_report`, `prompts/phase5_check.md` | 소~중 | 구조 | 결과 파일에 없는 수치가 결정적으로 드러난다. checker의 눈에만 기대지 않는다 |
 | 단순성 기준: 트랙 B에서 지표가 측정 잡음 안에서 같고 코드가 줄면 채택 | karpathy | `prompts/track_b.md`, `phase_track_ab` 채택 조건 | 소 | 규칙+구조 | 최적화 결과물이 덜 복잡해진다 |
-| 아이디어마다 반증 조건 한 줄 (`kill_if`) | K-Dense, FAROS | `prompts/phase2_diverge.md`, `phase2_critic.md`, `SELECT_SCHEMA` | 소 | 규칙 | 파일럿 관문과 감사에서 "무엇이 나오면 실패인가"가 미리 정해져 있다 |
+| 아이디어마다 반증 조건 한 줄 (`kill_if`) | K-Dense, FAROS | `prompts/phase2_diverge.md`, `phase2_critic.md`, `SELECT_SCHEMA` | 소 | 규칙 | 파일럿 확인 단계와 감사에서 "무엇이 나오면 실패인가"가 미리 정해져 있다 |
 | "알려지지 않음"을 "조사 범위에서 찾지 못함"으로 | K-Dense | `prompts/phase1_lit_synth.md` | 소 | 규칙 | 새로움 주장이 조사 범위를 넘지 않는다 |
 | 프로젝트별 교훈 파일: 실행이 끝나면 버려진 시도와 이유, 치명 지적과 판단을 원문 그대로 `~/autoresearch_runs/<프로젝트>/lessons.md`에 덧붙이고, 다음 실행의 조사·아이디어 단계에 넘김 | Arbor, AutoResearchClaw | `phase_final`, `phase_recon`, `phase2_diverge.md` | 중 | 구조 | 같은 프로젝트에서 실패한 아이디어를 다시 시도하지 않는다. 요약하지 않고 원문을 남겨야 Arbor처럼 내용이 흐려지지 않는다 |
 | 코드 수정 단계를 컨테이너에서 실행 | AutoResearchClaw | `llm_router.py`의 full 모드 호출, 설치 문서 | 대 | 구조 | 모든 권한으로 도는 에이전트가 클론 밖을 건드리지 못한다. 지금은 클론 격리와 프롬프트 지시뿐이다 |
 
 넣지 않기로 한 것:
 - **fork-and-flush의 병렬 가지와 Arbor의 가설 트리:** 이 도구의 시도는 이미 매번 앞 대화 없이 요약만 받는 새 호출이라 맥락을 비우는 효과가 있다. 병렬 worktree와 트리 관리는 코드가 크게 늘어난다.
-- **AutoResearchClaw의 개입 모드 6종, 품질 점수 정지, 비용 단계 정지:** 설정이 늘어난다. 관문 4개와 `run_limits`로 충분하다.
+- **AutoResearchClaw의 개입 모드 6종, 품질 점수 정지, 비용 단계 정지:** 설정이 늘어난다. 확인 단계 4개와 `run_limits`로 충분하다.
 - **FAROS의 주장-증거 연결표, 계획 변경 봉인, 승인 해시 체인:** 1만 줄 규모이고, 연결을 키워드 겹침으로 하는 한계가 있다. 수치 대조(위 표 셋째 줄)가 같은 목적을 더 작게 이룬다.
 - **인용 제목 단어 겹침 판정:** 이 도구의 조사 보고는 인용 제목을 정해진 칸에 적지 않아서 비교할 원문을 뽑기 어렵다. 찾은 제목은 이미 표로 정리 모델에게 넘긴다.
 - **위험 명령 차단 훅:** claude에만 걸리고 agy, codex에는 걸리지 않는다. 막으려면 컨테이너(위 표 마지막 줄)가 맞다.

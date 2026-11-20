@@ -1,4 +1,4 @@
-# 연구 명세: <연구 제목>
+# 연구 계획서: <연구 제목>
 
 ```yaml
 # 실행 때 이 블록의 값이 그대로 쓰인다. 다른 곳에서 덮어쓰지 않는다.
@@ -56,7 +56,7 @@ stages:                           # 단계별 모델 배정. 쓰는 트랙의 �
     selector: {provider: claude, model: fable, effort: high}
   phase3_pilot:
     builder: {provider: claude, model: fable, effort: high}   # 채점 코드를 쓴다. 틀리면 뒤 단계가 모두 틀리므로 강하게 둔다
-    explainer: {provider: agy, model: neon, effort: medium}  # 파일럿 관문에서 채점 코드가 하는 일을 자연어로 설명. builder와 다른 벤더 권장
+    explainer: {provider: agy, model: neon, effort: medium}  # 파일럿 확인 단계에서 채점 코드가 하는 일을 자연어로 설명. builder와 다른 벤더 권장
   crash_repair: {provider: claude, model: opus, effort: high}
   phase4_track_a:
     experimenter: {provider: claude, model: opus, effort: xhigh}
