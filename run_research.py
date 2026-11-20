@@ -52,6 +52,8 @@ SRC = Path(CFG["source_repo"]).expanduser().resolve()
 PROV_PATH = RUN / "providers.yaml" if (RUN / "providers.yaml").exists() else TOOL / "providers.yaml"   # 실행 폴더 사본 우선
 PROV = yaml.safe_load(PROV_PATH.read_text())
 TRACKS = CFG["track"] if isinstance(CFG["track"], list) else [t.strip() for t in str(CFG["track"]).split(",")]
+if len(TRACKS) != 1 or TRACKS[0] not in ("A", "B", "C"):   # 트랙끼리 후보 목록, 기준 코드, 기록, 채점 기준이 섞이므로 하나만
+    raise SystemExit(f"track은 A, B, C 중 하나만 적습니다 (받은 값: {CFG['track']}). 여러 트랙은 실행을 나눠서 돌립니다")
 STAGES, BUDGET = CFG.get("stages") or {}, CFG.get("budget") or {}
 NEED = ["phase1_recon", "phase2_ideation", "crash_repair", "phase5_audit"] \
     + (["phase3_pilot"] if {"A", "B"} & set(TRACKS) else []) + [f"phase4_track_{t.lower()}" for t in TRACKS]

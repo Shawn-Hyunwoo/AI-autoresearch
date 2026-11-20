@@ -10,7 +10,7 @@
 
 자율 연구 도구입니다. 연구 질문 하나를 주면 여러 언어 모델(Claude, Gemini 계열 `agy`, Codex)이 선행연구 조사, 아이디어 토론, 파일럿, 본 실험이나 증명, 교차 감사, 보고서 작성까지 차례로 해 나갑니다. 트랙 A·C의 선행연구는 세 벤더가 따로 조사한 뒤 합치고, 인용한 논문이 실제로 있는지 직접 조회합니다. 아이디어 토론에서는 제안하는 모델과 비평하는 모델이 1:1로 여러 회차 주고받습니다. 사람은 처음에 명세를 정하고, 중간의 몇 군데 관문에서 확인만 합니다. 설계 전체는 [docs/design_ko.md](docs/design_ko.md)에 있습니다.
 
-연구 목적에 따라 세 갈래(트랙)로 나뉩니다.
+연구 목적에 따라 세 갈래(트랙)로 나뉘고, 한 번 실행할 때 트랙 하나를 고릅니다.
 - 트랙 A: 새 양자 모델이나 방법이 실제로 쓸모 있는지 기준선과 비교해 확인합니다.
 - 트랙 B: 코드, 시뮬레이터, 알고리즘을 정확도를 지키면서 더 빠르게 만듭니다.
 - 트랙 C: 새 정리를 증명하고, 다른 모델이 그 증명을 반박하며 수치로 반례를 찾습니다.
@@ -129,7 +129,7 @@ MIT 라이선스입니다. 저작권 표시만 유지하면 누구나 쓰고, �
 
 A tool for autonomous research. Given one research question, several language models (Claude, the Gemini-based `agy`, and Codex) carry it through a literature and repository survey (for tracks A and C, three vendors search separately and every cited arXiv ID and DOI is looked up), idea debates (each proposing model argues with one critic over several rounds), a pilot, the main experiment or proof, a cross-vendor audit, and a final report. A person writes the spec at the start and only confirms at a few checkpoints. The full design (in Korean) is in [docs/design_ko.md](docs/design_ko.md).
 
-There are three tracks:
+There are three tracks, and each run uses one:
 - Track A: show that a new quantum model or method is actually useful, against baselines.
 - Track B: make code, simulators, or algorithms faster without breaking accuracy.
 - Track C: prove a new theorem while another model attacks the proof and searches for numerical counterexamples.
