@@ -18,7 +18,7 @@
 
 ### 어떻게 돌아가나
 
-![workflow](docs/pipeline_v5.svg)
+![workflow](docs/pipeline_v6.png)
 
 원칙은 다섯 가지입니다.
 - 원본 저장소의 브랜치는 건드리지 않습니다. 실행마다 클론을 만들고 그 안에서만 작업합니다. 원본에는 마지막에 사람이 승인할 때 새 브랜치 하나만 생깁니다.
@@ -140,7 +140,7 @@ There are four tracks, and each run uses one:
 
 ### How it works
 
-![workflow](docs/pipeline_v5.svg)
+![workflow](docs/pipeline_v6.png)
 
 Five rules:
 - The original repository's branches are never touched. Each run works inside its own clone. The original only gets one new branch at the end, after you approve.
