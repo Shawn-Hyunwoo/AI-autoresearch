@@ -54,19 +54,23 @@ SRC = Path(CFG["source_repo"]).expanduser().resolve()
 PROV_PATH = RUN / "providers.yaml" if (RUN / "providers.yaml").exists() else TOOL / "providers.yaml"   # 실행 폴더 사본 우선
 PROV = yaml.safe_load(PROV_PATH.read_text())
 TRACKS = CFG["track"] if isinstance(CFG["track"], list) else [t.strip() for t in str(CFG["track"]).split(",")]
-if len(TRACKS) != 1 or TRACKS[0] not in ("A", "B", "C"):   # 트랙끼리 후보 목록, 기준 코드, 기록, 채점 기준이 섞이므로 하나만
-    raise SystemExit(f"track은 A, B, C 중 하나만 적습니다 (받은 값: {CFG['track']}). 여러 트랙은 실행을 나눠서 돌립니다")
+if len(TRACKS) != 1 or TRACKS[0] not in ("A", "B", "C", "D"):   # 트랙끼리 후보 목록, 기준 코드, 기록, 채점 기준이 섞이므로 하나만
+    raise SystemExit(f"track은 A, B, C, D 중 하나만 적습니다 (받은 값: {CFG['track']}). 여러 트랙은 실행을 나눠서 돌립니다")
 STAGES, BUDGET = CFG.get("stages") or {}, CFG.get("budget") or {}
-NEED = ["phase1_recon", "phase2_ideation", "crash_repair", "phase5_audit"] \
-    + (["phase3_pilot"] if {"A", "B"} & set(TRACKS) else []) + [f"phase4_track_{t.lower()}" for t in TRACKS]
-NEED_BUDGET = ["max_crash_repairs", "run_limits"] + (["max_iterations"] if {"A", "B"} & set(TRACKS) else []) \
-    + (["seeds"] if "A" in TRACKS else []) + (["bench_rounds"] if "B" in TRACKS else []) \
+NEED = ["phase1_recon", "crash_repair", "phase5_audit"] + (["phase1_paper"] if "D" in TRACKS else ["phase2_ideation"]) \
+    + (["phase3_pilot"] if {"A", "B", "D"} & set(TRACKS) else []) + [f"phase4_track_{t.lower()}" for t in TRACKS]
+NEED_BUDGET = ["max_crash_repairs", "run_limits"] + (["max_iterations"] if {"A", "B", "D"} & set(TRACKS) else []) \
+    + (["seeds"] if {"A", "D"} & set(TRACKS) else []) + (["bench_rounds"] if "B" in TRACKS else []) \
     + (["max_debate_rounds"] if "C" in TRACKS else [])   # 쓰는 트랙에 필요한 항목만 요구한다
 MISSING = [f"stages.{k}" for k in NEED if k not in STAGES] + [f"budget.{k}" for k in NEED_BUDGET if k not in BUDGET]
 if MISSING:
     raise SystemExit(f"계획서에 빠진 항목: {', '.join(MISSING)} (templates/00_spec_template.md 참고)")
-if not STAGES["phase2_ideation"].get("critics"):
+if "D" not in TRACKS and not STAGES["phase2_ideation"].get("critics"):
     raise SystemExit("stages.phase2_ideation.critics가 비어 있습니다 (diverger마다 critic 한 명과 토론합니다)")
+PAPER = (SRC / str(CFG.get("paper") or "")).resolve()   # 트랙 D: 재현할 논문. 사용자가 프로젝트 폴더에 넣고 경로를 적는다
+if "D" in TRACKS and (not CFG.get("paper") or not PAPER.is_file() or not PAPER.is_relative_to(SRC)):
+    raise SystemExit(f"트랙 D는 연구 계획서의 paper에 프로젝트 폴더 안 논문 PDF 경로를 적어야 합니다 (받은 값: {CFG.get('paper')!r}). "
+                     "논문은 웹에서 찾지 않습니다")
 
 
 def slots_in(x, path="stages"):
@@ -136,7 +140,9 @@ DIRECTION = CONTRACT.get("direction", "higher_is_better")
 
 # 작성 모델과 반박·감사 모델은 계열(벤더)이 달라야 한다. 한도 초과로 대체된 뒤까지는 보장하지 않는다.
 MAIN_KINS = {kin(STAGES[f"phase4_track_{t.lower()}"][r])
-             for t, r in (("A", "experimenter"), ("B", "worker"), ("C", "prover")) if t in TRACKS}
+             for t, r in (("A", "experimenter"), ("B", "worker"), ("C", "prover"), ("D", "reproducer")) if t in TRACKS}
+if "D" in TRACKS and kin(STAGES["phase1_paper"]["reader"]) == kin(STAGES["phase1_paper"]["cross_reader"]):
+    raise SystemExit(f"트랙 D의 reader와 cross_reader(논문 대조)는 서로 다른 {UNIT}로 둬야 합니다")
 if "C" in TRACKS and kin(STAGES["phase4_track_c"]["prover"]) == kin(STAGES["phase4_track_c"]["refuter"]):
     raise SystemExit(f"트랙 C의 prover와 refuter는 서로 다른 {UNIT}로 둬야 합니다")
 if MAIN_KINS & {kin(a) for a in STAGES["phase5_audit"]["auditors"]}:
@@ -459,7 +465,7 @@ def run_case(work, script, seed=0, by_case=False):
                     "guard_reason": log[-300:]}
         repair(work, f"AR_SEED={seed} bash {script} {res}", log, attempt + 1)
     if by_case:
-        cases = {c.name: score(c, wall, c.name.split("@", 1)[1] if "@" in c.name else None)
+        cases = {c.name: score(c, wall, c.name if "D" in TRACKS else c.name.split("@", 1)[1] if "@" in c.name else None)
                  for c in sorted(p for p in res.iterdir() if p.is_dir())}
         s = {"status": "ok", "wall_time_sec": wall, "cases": cases or {"(경우 폴더 없음)": {
             "guard_pass": False, "primary_metric": None, "guard_reason": "result 아래에 경우별 폴더가 없음"}}}
@@ -476,6 +482,11 @@ def nums(rows, key="primary_metric"):
 
 def case_table(cases):
     # 경우별 비교표 (마크다운). 누적표에는 그 값을 낸 시도 번호가 붙는다
+    if any("trend_ok" in v for v in cases.values()):   # 트랙 D: 주장마다 논문 값과 재현 값, 경향과 크기 수준
+        return ("| 주장 | 논문 값 | 재현 평균 | 표준오차 | 시드 수 | 경향 | 크기 수준 | guard | 시도 |\n|---|---|---|---|---|---|---|---|---|\n"
+                + "".join(f"| {k} | {v.get('paper_value')} | {v['primary_metric']} | {v['spread']} | {v['n_seeds']} | "
+                          f"{v.get('trend_ok')} | {v.get('scale_ok')} | {v['guard_pass']} | {v.get('attempt', '')} |\n"
+                          for k, v in sorted(cases.items())))
     return (f"| 경우 | {CONTRACT.get('metric', 'metric')} 평균 | 표준오차 | 시드 수 | guard | 시도 |\n|---|---|---|---|---|---|\n"
             + "".join(f"| {k} | {v['primary_metric']} | {v['spread']} | {v['n_seeds']} | {v['guard_pass']} | "
                       f"{v.get('attempt', '')} |\n" for k, v in sorted(cases.items())))
@@ -490,7 +501,10 @@ def summarize(per):
                        "primary_metric": statistics.mean(vals) if vals else None,
                        "spread": statistics.stdev(vals) / len(vals) ** 0.5 if len(vals) > 1 else None,
                        "n_seeds": len(vals), "wall_time_sec": statistics.mean(nums(runs, "wall_time_sec") or [0]),
-                       "guard_reason": next((r.get("guard_reason", "") for r in runs if not r.get("guard_pass")), "")}
+                       "guard_reason": next((r.get("guard_reason", "") for r in runs if not r.get("guard_pass")), ""),
+                       **{k: all(r.get(k) for r in runs) for k in ("trend_ok", "scale_ok") if any(k in r for r in runs)},
+                       **({"paper_value": next(r["paper_value"] for r in runs if "paper_value" in r)}
+                          if any("paper_value" in r for r in runs) else {})}   # 트랙 D: 모든 시드에서 경향·크기 수준이 맞아야 참
     return cases
 
 
@@ -670,7 +684,7 @@ def check_citations(text):
 def phase_recon():
     st, refs = STAGES["phase1_recon"], references()
     deep = bool({"A", "C"} & set(TRACKS))
-    plain = [s for s in st["slots"] if not (deep and s["role"] == "lit_search")]
+    plain = [s for s in st["slots"] if not ((deep or "D" in TRACKS) and s["role"] == "lit_search")]   # 트랙 D는 웹 조사 없음
     finders = (st.get("searchers") or [{"provider": k, **v["search"]} for k, v in PROV["vendors"].items()
                                        if v.get("search") and k in USED]) if deep else []
     texts = parallel([(s, prompt(f"phase1_{s['role']}.md", spec=SPEC_TEXT, references=refs),
@@ -690,6 +704,71 @@ def phase_recon():
         parts.append(f"# lit_search (교차 조사: {who} / 정리·검증: {synth['provider']}/{synth['model']}/{synth['effort']})"
                      f"\n\n{lit}\n\n## 인용 확인 (제어기가 arXiv와 Crossref에서 직접 조회)\n\n{check_citations(lit)}")
     (OUT / "01_recon.md").write_text("\n\n".join(parts))
+
+
+# ---- 트랙 D: 논문 읽기 → 재현할 주장 고르기 (아이디어 토론 대신)
+CLAIMS_SCHEMA = ('```json\n{"claims": [{"id": "C1", "where": "표 2, 3행", "claim": "...", "paper_value": "...", '
+                 '"trend": "...", "settings": "...", "missing": ["..."], "cost": "..."}]}\n```')
+
+
+def parse_claims(text):
+    j = block_json(text)
+    if not isinstance(j.get("claims"), list) or not j["claims"] or any(not isinstance(c, dict) or not c.get("id")
+                                                                       for c in j["claims"]):
+        raise ValueError("claims 형식이 틀림")
+    return j
+
+
+def claims():
+    # 사용자가 고른 주장 목록
+    return json.loads(read(OUT / "01_claims_selected.json") or "{}").get("claims") or []
+
+
+def phase_paper():
+    # 사용자가 준 논문 PDF를 클론의 .ar_refs/로 복사하고(push하지 않음) 글자로 뽑는다. reader가 재현할 주장을 뽑고,
+    # 다른 벤더의 cross_reader가 논문과 하나씩 대조해 빠진 주장을 더하고 틀린 값을 고친다
+    st, d = STAGES["phase1_paper"], OUT / "01_paper"
+    d.mkdir(parents=True, exist_ok=True)
+    ex = REPO / ".git" / "info" / "exclude"
+    if "/.ar_refs/" not in ex.read_text():
+        with open(ex, "a") as f:
+            f.write("/.ar_refs/\n")
+    pdf = REPO / ".ar_refs" / "paper" / PAPER.name
+    pdf.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(PAPER, pdf)
+    txt = d / "paper.txt"
+    if shutil.which("pdftotext"):
+        sh(["pdftotext", "-layout", str(pdf), str(txt)], check=False)
+    where = f"PDF: {pdf}" + (f"\n글자로 뽑은 것(pdftotext, 표와 수식이 깨졌으면 PDF를 본다): {txt}" if txt.exists() else "")
+    code = CFG.get("author_code") or "없음"
+    _, a = agent_json("paper_reader", st["reader"], prompt("track_d_claims.md", spec=SPEC_TEXT, paper=where, author_code=code,
+                                                           draft="없음 (처음 뽑는다)"), d / "claims_reader.md", "readonly",
+                      parse_claims, CLAIMS_SCHEMA)
+    _, b = agent_json("paper_cross", st["cross_reader"], prompt("track_d_claims.md", spec=SPEC_TEXT, paper=where,
+                                                                author_code=code, draft=json.dumps(a, ensure_ascii=False, indent=1)),
+                      d / "claims_cross.md", "readonly", parse_claims, CLAIMS_SCHEMA)
+    (OUT / "01_claims.json").write_text(json.dumps(b, ensure_ascii=False, indent=2))
+
+
+def phase_claims_gate():
+    # 확인 단계: 뽑은 주장 가운데 재현할 것을 사람이 고른다
+    cs = json.loads(read(OUT / "01_claims.json"))["claims"]
+    table = "| id | 위치 | 주장 | 빠진 설정 |\n|---|---|---|---|\n" + "".join(
+        f"| {c['id']} | {str(c.get('where', ''))[:30]} | {str(c.get('claim', ''))[:60]} | {len(c.get('missing') or [])}개 |\n"
+        for c in cs)
+    say(f"[{RUN_ID}] 논문에서 재현할 수 있는 주장 {len(cs)}개를 뽑았습니다. 재현할 것을 골라 주세요.\n\n{table}\n"
+        f"전문: {OUT / '01_claims.json'}")
+    ids = {c["id"] for c in cs}
+    while True:
+        a = ask("Enter: 모두 재현 | 쉼표로 고르기(예: C1,C3) | q: 종료 > ")
+        if a.lower() == "q":
+            raise Stop("사용자가 주장 고르기에서 종료", by_user=True)
+        pick = [x.strip() for x in a.split(",") if x.strip()] or [c["id"] for c in cs]
+        if set(pick) <= ids:
+            break
+        print(f"없는 id: {', '.join(sorted(set(pick) - ids))}", flush=True)
+    (OUT / "01_claims_selected.json").write_text(json.dumps({"claims": [c for c in cs if c["id"] in pick]},
+                                                            ensure_ascii=False, indent=2))
 
 
 # ---- Phase 2: 아이디어 토론 → 선별. diverger마다 critic 한 명과 1:1로 최대 max_ideation_rounds회 주고받고,
@@ -726,6 +805,8 @@ def write_lessons():
         lines.append(f"- 트랙 C 마지막 판정: {json.dumps({k: v.get(k) for k in keys + more}, ensure_ascii=False)}")
     lines += [f"- 감사 치명 지적 ({x['who']}): {x['text']} → reporter {x.get('verdict') or '판단 없음'}. {x.get('note', '')}"
               for x in json.loads(read(OUT / "05_audit" / "fatal.json") or "{}").get("items") or []]
+    lines += [f"- 재현 판정 {k}: {x}" for k, x in json.loads(read(MAIN / "reproduction.json") or "{}").items()
+              if not x.startswith("재현됨")]
     if STATE["status"] == "STOPPED" and STATE["phase"] != "final":
         lines.append(f"- 멈춤 ({STATE['phase']}): {STATE.get('stop_reason', '')[:300]}")
     title = next((re.sub(r"^연구 (?:명세|계획서):\s*", "", ln[2:].strip()) for ln in SPEC_TEXT.splitlines() if ln.startswith("# ")), "")
@@ -840,14 +921,19 @@ def harness_check():
 
 def pilot_runs():
     pilot = OUT / "03_pilot"
-    if "A" in TRACKS:
-        cases = {p.name: p / "run.sh" for p in sorted(pilot.iterdir()) if (p / "run.sh").exists()}
-    else:  # ponytail: 트랙 B 파일럿은 현재 코드 측정만. 최적화 후보는 Phase 4 루프에서 시도한다
-        cases = {"current_code": EVAL / "run_bench.sh"}
-    rows = {name: run_case(pilot / name, script) for name, script in cases.items()}
+    if "D" in TRACKS:   # 트랙 D: run.sh 하나가 주장마다 폴더를 만들고, 주장마다 채점한다
+        s = run_case(pilot / "run", pilot / "run.sh", by_case=True)
+        rows = {k: {**v, "status": s["status"]} for k, v in (s.get("cases") or {}).items()} or {"run.sh": s}
+    else:
+        if "A" in TRACKS:
+            cases = {p.name: p / "run.sh" for p in sorted(pilot.iterdir()) if (p / "run.sh").exists()}
+        else:  # ponytail: 트랙 B 파일럿은 현재 코드 측정만. 최적화 후보는 Phase 4 루프에서 시도한다
+            cases = {"current_code": EVAL / "run_bench.sh"}
+        rows = {name: run_case(pilot / name, script) for name, script in cases.items()}
     sel = json.loads(read(OUT / "02_ideation" / "02_selected.json") or "{}")   # 표의 id마다 무엇인지 한 줄
     what = {"current_code": "수정 전 코드", **{b.get("id"): b.get("name", "") for b in sel.get("sota_baselines") or []},
-            **{c.get("id"): c.get("title", "") for c in sel.get("selected_candidates") or []}}
+            **{c.get("id"): c.get("title", "") for c in sel.get("selected_candidates") or []},
+            **{c.get("id"): c.get("claim", "") for c in claims()}}
     g4 = lambda x: f"{x:.4g}" if isinstance(x, float) else x
     table = "파일럿: 최소 규모 동작 확인 (성능 순위가 아님)\n\n" \
         "| case | 무엇인가 | status | guard_pass | primary_metric | wall_time_sec |\n|---|---|---|---|---|---|\n" + "".join(
@@ -860,7 +946,8 @@ def pilot_runs():
 def phase_pilot():
     agent("builder", STAGES["phase3_pilot"]["builder"], prompt(
         "phase3_build.md", track=",".join(TRACKS), spec=SPEC_TEXT, recon=read(OUT / "01_recon.md"),
-        selected=read(OUT / "02_ideation" / "02_selected.json"), eval_dir=EVAL, pilot_dir=OUT / "03_pilot"),
+        selected=read(OUT / ("01_claims_selected.json" if "D" in TRACKS else "02_ideation/02_selected.json")),
+        eval_dir=EVAL, pilot_dir=OUT / "03_pilot", author_code=CFG.get("author_code") or "없음"),
         OUT / "03_pilot" / "builder.md", "full", env=BUILD_ENV)
     shutil.rmtree(SELFTEST, ignore_errors=True)         # 자기 점검용 정답은 남기지 않는다
     harness_check()
@@ -918,7 +1005,7 @@ def phase_gate_pilot():
 # ---- Phase 4 트랙 A/B: 시도 1회 = 에이전트 수정 → 제어기 실행·채점 → 채택(commit) 또는 원복(reset)
 def phase_track_ab(track):
     st = STAGES[f"phase4_track_{track.lower()}"]
-    role = "experimenter" if track == "A" else "worker"
+    role = {"A": "experimenter", "B": "worker", "D": "reproducer"}[track]
     tsv, notes = MAIN / "results.tsv", MAIN / "notes.md"
     MAIN.mkdir(parents=True, exist_ok=True)
     if not tsv.exists():
@@ -965,7 +1052,8 @@ def phase_track_ab(track):
             "없음. 선별 후보는 모두 시도했다. 결과와 노트를 보고 다음 방법을 직접 고른다." 
         text = llm.call(cur, prompt(
             f"track_{track.lower()}.md", iter=it, max_iter=BUDGET["max_iterations"], spec=SPEC_TEXT,
-            selected=read(OUT / "02_ideation" / "02_selected.json"), pilot=read(OUT / "03_pilot" / "pilot_table.md"),
+            selected=read(OUT / ("01_claims_selected.json" if track == "D" else "02_ideation/02_selected.json")),
+            pilot=read(OUT / "03_pilot" / "pilot_table.md"), author_code=CFG.get("author_code") or "없음",
             results=tail(tsv), notes=tail(notes, 60), advice=T["advice"], iter_dir=work, eval_dir=EVAL,
             best_commit=STATE["best_commit"], best_metric=T["best_metric"], direction=DIRECTION,
             min_pct=CONTRACT.get("min_improvement_pct", 1.0), build_cmd=CFG.get("build_cmd") or "없음",
@@ -973,7 +1061,7 @@ def phase_track_ab(track):
             comparison_all=read(MAIN / "comparison_all.md", "아직 없음 (첫 시도)"),
             regimes=", ".join(sorted(p.name for p in (EVAL / "inputs").glob("*") if p.is_dir())) or "main"),
             work / "agent.md", mode="full", cwd=REPO, env=ENV)
-        if track == "A":
+        if track in ("A", "D"):
             s = attempt_a(work)
             delta = None
             keep = bool(s.get("guard_pass"))
@@ -986,14 +1074,14 @@ def phase_track_ab(track):
         summary = ("(단순화) " if track == "B" and keep and simpler else "") + (f"[{cand.get('id')}] " if cand else "") \
             + ("; ".join(disc) or s.get("guard_reason", ""))
         if keep:
-            if track == "A":
+            if track in ("A", "D"):
                 git("add", "-A")
-                git("commit", "--allow-empty", "-q", "-m", f"A iter {it}: {summary[:60]}")
+                git("commit", "--allow-empty", "-q", "-m", f"{track} iter {it}: {summary[:60]}")
             else:                                       # 후보는 attempt_b에서 이미 커밋됨. 메시지만 바꾼다
                 git("commit", "--amend", "--allow-empty", "-q", "-m", f"B iter {it}: {summary[:60]}")
             STATE["best_commit"] = git("rev-parse", "HEAD")
-            if track == "A":                            # 채택된 시도의 경우를 누적표에 합친다 (같은 경우는 최신 값으로)
-                T.setdefault("cases", {}).update({k: {**v, "attempt": f"A{it}", "commit": STATE["best_commit"]}
+            if track in ("A", "D"):                     # 채택된 시도의 경우를 누적표에 합친다 (같은 경우는 최신 값으로)
+                T.setdefault("cases", {}).update({k: {**v, "attempt": f"{track}{it}", "commit": STATE["best_commit"]}
                                                  for k, v in s["cases"].items()})
                 (MAIN / "comparison_all.md").write_text(case_table(T["cases"]))
             if track == "B" and (T["best_metric"] is None or (delta or 0) > 0):   # 트랙 A는 경우별 표(comparison.md)로 본다
@@ -1004,7 +1092,7 @@ def phase_track_ab(track):
             git("clean", "-fd")
             T["stale"] += 1
         status = "keep" if keep else ("crash" if s["status"] == "crash" else "discard")
-        if track == "A" and s.get("cases"):             # 트랙 A는 경우(모델 × regime)마다 한 줄
+        if track in ("A", "D") and s.get("cases"):      # 트랙 A는 경우(모델 × regime)마다, 트랙 D는 주장마다 한 줄
             for i, (name, c) in enumerate(s["cases"].items()):
                 row(f"{it}:{name}", STATE["best_commit"][:9] if keep else "-", status, c, None, summary if i == 0 else "")
         else:
@@ -1021,6 +1109,39 @@ def phase_track_ab(track):
         save_state()
         if re.search(r"^NEXT:\s*done", text, re.M | re.I) and it >= len(cands):   # 후보가 남아 있으면 done을 무시
             break
+        done = T.get("cases") or {}
+        if track == "D" and all(done.get(c["id"], {}).get("trend_ok") and done.get(c["id"], {}).get("scale_ok")
+                                for c in claims()):   # 고른 주장이 모두 재현되면 끝
+            break
+
+
+# ---- 트랙 D 끝: 주장마다 판정하고, 재현되지 않은 주장은 저자에게 물어볼 것을 정리한다
+def phase_verdict_d():
+    cases, rows, verdicts = (STATE.get("track_D") or {}).get("cases") or {}, [], {}
+    for c in claims():
+        k, v = c["id"], cases.get(c["id"])
+        att = v.get("attempt", "") if v else ""
+        reduced = bool(att) and any(MAIN.glob(f"D_iter_{int(att[1:]):02d}/seed_*/result/{k}/reduced.txt"))
+        if not v or not v.get("guard_pass"):
+            verdict = "판정 불가 (실행이나 채점 실패)"
+        elif v.get("trend_ok") and v.get("scale_ok"):
+            verdict = "재현됨" + (" (규모 축소)" if reduced else "")
+        else:
+            verdict = "재현 안 됨"
+        verdicts[k] = verdict
+        rows.append(f"| {k} | {str(c.get('where', ''))[:30]} | {str(c.get('claim', ''))[:60]} | {(v or {}).get('paper_value')} | "
+                    f"{(v or {}).get('primary_metric')} | {(v or {}).get('trend_ok')} | {(v or {}).get('scale_ok')} | {verdict} |\n")
+    (MAIN / "reproduction.json").write_text(json.dumps(verdicts, ensure_ascii=False, indent=2))
+    (MAIN / "reproduction.md").write_text(
+        "주장별 재현 판정 (경향과 크기 수준이 모든 시드에서 맞으면 재현됨. 수치가 같을 필요는 없다)\n\n"
+        "| 주장 | 위치 | 내용 | 논문 값 | 재현 평균 | 경향 | 크기 수준 | 판정 |\n|---|---|---|---|---|---|---|---|\n" + "".join(rows))
+    bad = [k for k, x in verdicts.items() if not x.startswith("재현됨")]
+    if bad:
+        agent("authors_note", STAGES["phase5_audit"]["reporter"], prompt(
+            "track_d_questions.md", spec=SPEC_TEXT, claims=read(OUT / "01_claims_selected.json"),
+            table=read(MAIN / "reproduction.md"), results=tail(MAIN / "results.tsv", 80), notes=tail(MAIN / "notes.md", 80),
+            bad=", ".join(bad), author_code=CFG.get("author_code") or "없음"),
+              MAIN / "questions_for_authors.md", "readonly", human=True)
 
 
 # ---- Phase 4 끝: 결론 수치를 위한 마지막 측정 (모델 호출 없음)
@@ -1187,7 +1308,8 @@ def phase_audit():
     files = sorted(str(p.relative_to(REPO)) for p in OUT.rglob("*")
                    if p.is_file() and p.suffix in (".json", ".tsv", ".csv", ".log", ".md", ".py", ".sh"))
     verdicts = "\n".join(f"{p.name}: {p.read_text()}" for p in sorted(MAIN.glob("round_*_verdict.json"))) or "없음"
-    final = "\n\n".join(read(MAIN / f) for f in ("final_test.md", "B_confirm.md") if (MAIN / f).exists()) or "없음"
+    final = "\n\n".join(read(MAIN / f) for f in ("final_test.md", "B_confirm.md", "reproduction.md",
+                                                 "questions_for_authors.md") if (MAIN / f).exists()) or "없음"
     ctx = dict(spec=SPEC_TEXT, tracks=",".join(TRACKS), files="\n".join(files[:400]), results=tail(MAIN / "results.tsv", 80),
                verdicts=verdicts, selected=read(OUT / "02_ideation" / "02_selected.json"), out_dir=OUT, final=final)
     texts = parallel([(s, prompt("phase5_audit.md", **ctx), OUT / "05_audit" / f"auditor_{i:02d}.md", "readonly", True)
@@ -1231,7 +1353,8 @@ def unmatched_numbers(report):
     # 계산해서 나온 값일 수도 있으므로 판정은 checker가 한다. 감사 글과 보고서 자신은 근거로 치지 않는다
     srcs = [p for p in OUT.rglob("*") if p.is_file() and p.stat().st_size < 5e6 and "05_audit" not in p.parts
             and (p.suffix in (".json", ".tsv", ".csv") or p.name in (
-                "01_recon.md", "comparison.md", "comparison_all.md", "final_test.md", "B_confirm.md", "pilot_table.md"))]
+                "01_recon.md", "comparison.md", "comparison_all.md", "final_test.md", "B_confirm.md", "pilot_table.md",
+                "reproduction.md", "paper.txt"))]
     known = sorted({float(x) for p in srcs for x in NUM_RE.findall(read(p))})
 
     def found(v, tol):
@@ -1335,7 +1458,8 @@ def remote_is_private(remote):
     return False, "공개 저장소"
 
 
-STEP_NAME = {"workspace": "준비", "recon": "조사", "known_C": "조사", "ideation": "아이디어 토론", "pilot": "파일럿",
+STEP_NAME = {"workspace": "준비", "recon": "조사", "known_C": "조사", "paper": "논문 읽기", "claims_gate": "논문 읽기",
+             "ideation": "아이디어 토론", "pilot": "파일럿", "track_D": "본 실험", "verdict_D": "판정",
              "gate_pilot": "파일럿",
              "track_A": "본 실험", "track_B": "본 실험", "track_C": "본 실험", "final_test_A": "최종 시험",
              "confirm_B": "최종 비교", "audit": "감사·보고"}
@@ -1373,7 +1497,8 @@ def phase_final():
         + "".join(f"{who}: 치명 지적 목록을 형식대로 받지 못함. 05_audit.md 확인\n\n" for who in fatal.get("unformatted") or [])
     warn += "".join(f"참고: {a}\n" for a in ADAPT) + ("\n" if ADAPT else "")
     say(f"[{RUN_ID}] 완료\n{warn}보고서: {OUT / '06_report.md'}\n\n{(rep[:heads[1]] if len(heads) > 1 else rep[:3000]).strip()}"
-        f"\n\n{cost_summary()}")
+        + (f"\n\n**저자에게 물어볼 것**\n{read(MAIN / 'questions_for_authors.md')[:1500].strip()}"
+           if (MAIN / "questions_for_authors.md").exists() else "") + f"\n\n{cost_summary()}")
     if ask(f"보고서를 확인했으면 원본({SRC})의 새 브랜치 {BRANCH}로 push할까요? [y/N] > ").lower() != "y":
         raise Stop("push 보류. 나중에 --resume으로 다시 묻습니다", by_user=True)
     final = f"{BRANCH}-final"
@@ -1408,9 +1533,9 @@ def phase_final():
 
 
 # ---- 실행
-PHASES = [("workspace", phase_workspace), ("recon", phase_recon)] \
-    + ([("known_C", phase_known_c)] if "C" in TRACKS else []) + [("ideation", phase_ideation)]
-if {"A", "B"} & set(TRACKS):
+PHASES = [("workspace", phase_workspace), ("recon", phase_recon)] + ([("known_C", phase_known_c)] if "C" in TRACKS else []) \
+    + ([("paper", phase_paper), ("claims_gate", phase_claims_gate)] if "D" in TRACKS else [("ideation", phase_ideation)])
+if {"A", "B", "D"} & set(TRACKS):
     PHASES += [("pilot", phase_pilot), ("gate_pilot", phase_gate_pilot)]
 for t in TRACKS:
     PHASES.append((f"track_{t}", phase_track_c if t == "C" else (lambda t=t: phase_track_ab(t))))
@@ -1418,6 +1543,8 @@ for t in TRACKS:
         PHASES.append(("final_test_A", phase_final_test_a))
     if t == "B":
         PHASES.append(("confirm_B", phase_confirm_b))
+    if t == "D":
+        PHASES.append(("verdict_D", phase_verdict_d))
 PHASES += [("audit", phase_audit), ("final", phase_final)]
 
 save_state()

@@ -10,10 +10,11 @@
 
 자율 연구 도구입니다. 연구 질문 하나를 주면 여러 언어 모델(Claude, Gemini 계열 `agy`, Codex)이 선행연구 조사, 아이디어 토론, 파일럿, 본 실험이나 증명, 교차 감사, 보고서 작성까지 차례로 해 나갑니다. 트랙 A·C의 선행연구는 세 벤더가 따로 조사한 뒤 합치고, 인용한 논문이 실제로 있는지 직접 조회합니다. 아이디어 토론에서는 제안하는 모델과 비평하는 모델이 1:1로 여러 회차 주고받습니다. 사람은 처음에 계획서를 정하고, 중간의 몇 군데 확인 단계에서만 답합니다. 설계 전체는 [docs/design_ko.md](docs/design_ko.md)에 있습니다.
 
-연구 목적에 따라 세 갈래(트랙)로 나뉘고, 한 번 실행할 때 트랙 하나를 고릅니다.
+연구 목적에 따라 네 갈래(트랙)로 나뉘고, 한 번 실행할 때 트랙 하나를 고릅니다.
 - 트랙 A: 새 모델, 방법, 분석이 실제로 쓸모 있는지 기준선과 비교해 확인합니다. 양자 방법이면 고전적으로 흉내 낸 기준선, 자원량, 노이즈 아래 결과까지 봅니다.
 - 트랙 B: 코드, 시뮬레이터, 알고리즘을 정확도를 지키면서 더 빠르게 만듭니다.
 - 트랙 C: 새 정리를 증명하고, 다른 모델이 그 증명을 반박하며 수치로 반례를 찾습니다.
+- 트랙 D: 프로젝트 폴더에 넣어 둔 논문의 결과를 다시 돌려, 논문이 주장한 경향과 크기 수준이 맞는지 주장마다 판정합니다. 재현되지 않은 주장은 저자에게 물어볼 것을 정리해 줍니다.
 
 ### 어떻게 돌아가나
 
@@ -106,6 +107,7 @@ defaults.yaml이 없으면 같은 프로젝트의 직전 계획서를, 그것도
    `Ctrl-b d`로 빠져나와도 계속 돕니다.
 3. 멈추는 곳은 세 군데이고, `tmux attach -t research`로 들어가 답합니다.
    - 파일럿 뒤 채점 코드 확인 (트랙 A/B): Enter = 잠그고 진행, `q` = 종료, 한글 문장 = 그대로 채점 코드 수정
+   - 트랙 D에서 논문의 주장 목록이 나온 뒤: Enter = 모두 재현, `C1,C3` = 고른 것만, `q` = 종료
    - 트랙 C에서 문헌 조사가 계획서의 정리를 이미 증명됐거나 반증된 결과로 판정했을 때: Enter = 더 일반적이거나 강한 변형으로 계속, `q` = 종료
    - 트랙 C에서 논리와 반례는 통과했지만 반박 모델과 의견이 갈린 점이 남았을 때: Enter = 감사 진행, `q` = 폐기
    - 보고서 뒤: `y` = 원본에 브랜치 `autoresearch/<run_id>`를 만들고 push (비공개 GitHub 원격일 때만 push, 아니면 브랜치만)
@@ -130,10 +132,11 @@ MIT 라이선스입니다. 저작권 표시만 유지하면 누구나 쓰고, �
 
 A tool for autonomous research. Given one research question, several language models (Claude, the Gemini-based `agy`, and Codex) carry it through a literature and repository survey (for tracks A and C, three vendors search separately and every cited arXiv ID and DOI is looked up), idea debates (each proposing model argues with one critic over several rounds), a pilot, the main experiment or proof, a cross-vendor audit, and a final report. A person writes the spec at the start and only confirms at a few checkpoints. The full design (in Korean) is in [docs/design_ko.md](docs/design_ko.md).
 
-There are three tracks, and each run uses one:
+There are four tracks, and each run uses one:
 - Track A: show that a new model, method or analysis is actually useful, against baselines. For a quantum method it also checks a classical simulation baseline, resource counts and results under noise.
 - Track B: make code, simulators, or algorithms faster without breaking accuracy.
 - Track C: prove a new theorem while another model attacks the proof and searches for numerical counterexamples.
+- Track D: reproduce the results of a paper you put in the project folder, judging each claim by whether its trend and order of magnitude hold. For claims that do not reproduce, it lists questions to ask the authors.
 
 ### How it works
 
@@ -224,6 +227,7 @@ Without defaults.yaml, `/research-spec` uses the latest previous spec of the sam
    Detach with `Ctrl-b d`; it keeps running.
 3. It stops at three places. Attach with `tmux attach -t research` and answer:
    - after the pilot, to check the scoring code (tracks A/B): Enter = lock and continue, `q` = stop, any sentence = edit the scoring code as told
+   - in track D, after the claims are extracted from the paper: Enter = reproduce all, `C1,C3` = only these, `q` = stop
    - in track C, when the literature survey finds the spec's theorem already proven or disproven: Enter = continue with a more general or stronger variant, `q` = stop
    - in track C, when logic and counterexample checks pass but the refuter still disagrees on generality: Enter = go to the audit, `q` = discard
    - after the report: `y` = create branch `autoresearch/<run_id>` in the original and push it (pushes only to a private GitHub remote, otherwise creates the branch only)

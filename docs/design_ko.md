@@ -10,10 +10,11 @@
 
 원격 GPU 서버의 tmux에서 도는 범용 자율 연구 도구다. 사람이 연구 질문을 주면 `claude`와 대화해 연구 계획서(`00_spec.md`)를 확정한다. 그 뒤 여러 회사 모델(Claude, Gemini 계열 `agy`, Codex)이 선행연구 조사, 아이디어 토론, 파일럿, 본 실험이나 증명, 교차 감사, 보고서 작성까지 한다. 특정 프로젝트에 묶이지 않는다.
 
-트랙은 셋이고, 한 실행에 하나만 고른다. 여러 트랙을 한 실행에 넣으면 후보 목록, 기준 코드, 기록, 채점 기준을 같이 써서 서로 섞이므로, 여러 트랙이 필요하면 실행을 나눈다.
+트랙은 넷이고, 한 실행에 하나만 고른다. 여러 트랙을 한 실행에 넣으면 후보 목록, 기준 코드, 기록, 채점 기준을 같이 써서 서로 섞이므로, 여러 트랙이 필요하면 실행을 나눈다.
 - **A 효용 실증:** 새 모델, 방법, 분석(ML 모델, 알고리즘, 데이터 분석, 양자 방법 등)이 기준선보다 쓸모 있는지, 어떤 구간에서 강한지 보인다.
 - **B 코드 최적화:** 시뮬레이터, 연산 커널, 근사 휴리스틱을 정확도를 지키면서 더 빠르거나 가볍게 만든다.
 - **C 정리 증명:** 오차 경계, 복잡도 상하한, 수렴성 같은 새 정리를 증명하고 수치로 반례를 찾는다.
+- **D 논문 재현:** 사용자가 준 논문의 표와 그림이 주장하는 결과를 다시 돌려, 경향과 크기 수준이 맞는지 주장마다 판정한다.
 
 원칙:
 1. **원본 격리:** 실행마다 원본을 클론하고 원격을 지운 뒤 클론의 작업 브랜치에서만 일한다. 원본에는 마지막에 사람이 승인할 때 새 브랜치 하나만 생긴다.
@@ -103,6 +104,8 @@
 | `phase4_track_a` | experimenter `claude/opus/xhigh` | 전체 허용 |
 | `phase4_track_b` | worker `claude/opus/high` / unstuck_peer `agy/neon/xhigh` | worker 전체 허용 |
 | `phase4_track_c` | prover `claude/fable/high` (상한 뒤 `opus/xhigh`) / refuter `codex/astra/high` (상한 뒤 `agy/neon/xhigh`) | refuter 전체 허용 |
+| `phase1_paper` (D) | reader `claude/fable/high` / cross_reader `agy/neon/high` | 읽기 전용 |
+| `phase4_track_d` | reproducer `claude/opus/xhigh` | 전체 허용 |
 | `phase5_audit` | auditors `agy/neon/high`, `codex/astra/high` / reporter `claude/opus/xhigh` / checker `agy/neon/high` | 읽기 전용 |
 
 배정의 기준 (모델·추론 단계별 공개 벤치마크의 성능, 시간, 가격을 보고 정했다):
@@ -313,6 +316,21 @@ prover(읽기 전용)가 증명을 쓰고 다른 벤더의 refuter(전체 허용
 - 논리 결함이나 수치 반례가 있거나 탐색이 돌지 못했으면 묻지 않고 기각한다.
 - 논리와 반례는 통과했는데 범위, 비자명성, tightness, 탐색 범위 중 남은 이견이 있으면 감사 전에 멈추고 사람에게 묻는다(`Enter` 진행, `q` 폐기).
 
+#### 트랙 D: 논문 재현
+
+아이디어 토론, 웹 조사, 최종 시험이 없다. 맞춰 볼 목표가 논문에 공개된 수치라 숨길 정답이 없기 때문이다.
+1. **논문:** 사용자가 프로젝트 폴더에 PDF를 넣고 연구 계획서의 `paper`에 경로를 적는다. 논문을 웹에서 찾지 않는다. 시작할 때 파일이 없으면 클론을 만들기 전에 멈춘다. 저자 코드(`author_code`)는 선택이다.
+2. **주장 뽑기(`01_paper/`, `01_claims.json`):** 제어기가 PDF를 클론의 `.ar_refs/`로 복사하고 `pdftotext`로 글자를 뽑는다. reader가 재현할 수 있는 주장(위치, 논문 값, 경향, 적힌 설정, 빠진 설정, 계산량)을 뽑고, 다른 벤더의 cross_reader가 논문과 하나씩 대조해 고친다.
+3. **확인 단계:** 주장 목록을 보여 주고 재현할 것을 사람이 고른다(Enter 모두, `C1,C3`처럼 고르기, `q` 종료).
+4. **파일럿:** builder가 주장마다 판정하는 `metrics.py`를 쓴다. 판정 기준은 결과를 보기 전에 정한다. 출력은 guard(결과가 온전한가), 재현 값, 논문 값, `trend_ok`(경향이 맞는가), `scale_ok`(크기 수준이 맞는가)다.
+5. **본 실행:** 트랙 A의 시도 방식(시드, 주장별 채점, 누적표)을 그대로 쓴다.
+   - 첫 시도는 고른 주장을 모두 논문 설정대로 돌린다. 저자 코드가 있으면 그것을 먼저 쓴다.
+   - 계산 자원이 모자라면 규모를 줄여도 된다. 줄인 주장은 결과 폴더에 `reduced.txt`를 남긴다.
+   - 뒤 시도는 맞지 않은 주장만 다시 본다. 바꿀 수 있는 것은 논문에 빠진 설정뿐이다. 수치를 논문 값에 맞추려고 여러 값을 훑지 않는다.
+   - 고른 주장이 모두 재현되면 끝난다.
+6. **판정(`reproduction.md`):** 주장마다 "재현됨", "재현됨 (규모 축소)", "재현 안 됨", "판정 불가 (실행이나 채점 실패)" 중 하나다. 수치가 같을 필요는 없고, 경향과 크기 수준이 모든 시드에서 맞으면 재현됨이다.
+7. **저자에게 물어볼 것(`questions_for_authors.md`):** 재현되지 않은 주장마다 한 것, 다른 점, 원인으로 보이는 빠진 정보, 짧은 질문 한두 개를 적는다. 완료 알림에 붙어서 저자에게 후속 연락할 때 쓴다.
+
 ### Phase 5: 감사와 보고 (`05_audit.md`, `06_report.md`)
 
 **감사:** 감사자는 본 실험을 맡지 않은 벤더의 모델이다. 읽기 전용으로 원본 결과 파일과 수식을 보고 여덟 항목을 감사한다(`prompts/phase5_audit.md`).
@@ -447,7 +465,8 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
 └── repo/                                # 클론 (원격 없음)
     └── research_runs/<run_id>/          # 산출물 (git에서 숨김)
         ├── 01_recon.md  01_recon/        02_ideation/   evaluation/   03_pilot/
-        ├── 04_main/                     # results.tsv, notes.md, 시도·라운드 폴더, final_test.md, B_confirm.md
+        ├── 01_paper/  01_claims.json  01_claims_selected.json   # 트랙 D
+        ├── 04_main/                     # results.tsv, notes.md, 시도·라운드 폴더, final_test.md, reproduction.md, B_confirm.md
         ├── 05_audit.md  05_audit/       # 감사, fatal.json, 보고서 검토
         └── 06_report.md  06_report_draft.md
 ```
