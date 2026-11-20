@@ -452,7 +452,7 @@ iter	commit	status	guard_pass	primary_metric	spread	wall_time_sec	delta_pct	summ
   - 치명 지적 알림
   - 반례 탐색 범주
   - `--resume`
-- **확인하지 않은 것:** 읽기 전용 단계에서 도구 승인이 필요할 때의 동작이다. `agy --sandbox`는 승인을 기다리며 멈출 수 있다.
+- **읽기 전용 단계의 agy:** `--sandbox`만 주면 파일을 쓸 수 있고, 승인이 필요한 명령을 만나면 사람 없이 거부된 채 빈 답으로 끝난다. 그래서 명령과 파일 쓰기를 거부 규칙(`--settings`)으로 막는다. 이렇게 하면 agy가 거부를 받고도 답을 끝까지 쓴다(읽기와 웹 검색은 된다).
 
 ## 부록: Slack 알림
 

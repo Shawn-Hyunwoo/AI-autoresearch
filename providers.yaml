@@ -30,7 +30,8 @@ vendors:
     efforts: [low, medium, high, xhigh]
     cmd: ["agy", "--model", "{model}-{effort}"]  # ID에 추론 단계가 붙은 형식 (gemini-4-neon-high)
     full_flags: ["--dangerously-skip-permissions"]
-    readonly_flags: ["--sandbox"]
+    # --sandbox만으로는 파일 쓰기가 막히지 않고, 승인이 필요한 명령을 만나면 빈 답으로 끝난다. 명령과 쓰기를 거부 규칙으로 막는다
+    readonly_flags: ["--sandbox", "--settings", '{"permissions":{"deny":["command(*)","write_file(*)"]}}']
     prompt_via: arg
     prompt_arg: "-p={prompt}"
     session: {id: json, new: ["--output-format", "json"], resume: ["--output-format", "json", "--conversation", "{session}"]}
