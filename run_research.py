@@ -833,10 +833,14 @@ def pilot_runs():
     else:  # ponytail: 트랙 B 파일럿은 현재 코드 측정만. 최적화 후보는 Phase 4 루프에서 시도한다
         cases = {"current_code": EVAL / "run_bench.sh"}
     rows = {name: run_case(pilot / name, script) for name, script in cases.items()}
+    sel = json.loads(read(OUT / "02_ideation" / "02_selected.json") or "{}")   # 표의 id마다 무엇인지 한 줄
+    what = {"current_code": "수정 전 코드", **{b.get("id"): b.get("name", "") for b in sel.get("sota_baselines") or []},
+            **{c.get("id"): c.get("title", "") for c in sel.get("selected_candidates") or []}}
+    g4 = lambda x: f"{x:.4g}" if isinstance(x, float) else x
     table = "파일럿: 최소 규모 동작 확인 (성능 순위가 아님)\n\n" \
-        "| case | status | guard_pass | primary_metric | wall_time_sec |\n|---|---|---|---|---|\n" + "".join(
-        f"| {k} | {v['status']} | {v.get('guard_pass')} | {v.get('primary_metric')} | {v.get('wall_time_sec')} |\n"
-        for k, v in rows.items())
+        "| case | 무엇인가 | status | guard_pass | primary_metric | wall_time_sec |\n|---|---|---|---|---|---|\n" + "".join(
+        f"| {k} | {str(what.get(k, ''))[:40]} | {v['status']} | {v.get('guard_pass')} | {g4(v.get('primary_metric'))} | "
+        f"{g4(v.get('wall_time_sec'))} |\n" for k, v in rows.items())
     (pilot / "pilot_table.md").write_text(table)
     return rows, table
 
@@ -1110,6 +1114,12 @@ def run_hunter(rd):
             "coverage_missing": list(HUNT_CATS)}
 
 
+def summary_of(text):
+    # 증명·반박 글의 '## 요약' 절 (사람이 관문에서 읽는 부분). 판정 JSON 줄은 뺀다. 없으면 None
+    m = re.search(r"^##\s*요약\s*\n(.*?)(?=^##\s|\Z)", text or "", re.S | re.M)
+    return "\n".join(ln for ln in m[1].strip().splitlines() if not ln.lstrip().startswith("{")).strip() if m else None
+
+
 def phase_track_c():
     st = STAGES["phase4_track_c"]
     C = STATE.setdefault("track_C", {"round": 0, "verdict": None})
@@ -1142,9 +1152,19 @@ def phase_track_c():
     if not v["logic_sound"] or v["counterexamples_found"] != 0 or not v["tested_cases"]:
         raise Stop(f"트랙 C 기각: 논리 결함 또는 수치 반례\n{json.dumps(v, ensure_ascii=False)}")
     last = MAIN / f"C_round_{C['round']:02d}"
-    say(f"[{RUN_ID}] 트랙 C: 논리와 수치 반례 검사는 통과했지만 일반성·비자명성·경계의 tightness·반례 탐색 범위 중 통과하지 못한 것이 있음.\n"
-        f"판정: {json.dumps(v, ensure_ascii=False)}\n\n증명 앞부분:\n{read(last / 'proof.md')[:1500]}\n\n"
-        f"반박 요지:\n{read(last / 'refute.md')[-1500:]}")
+    names = {"extreme": "극단", "singular": "특이점", "equality": "등호 근처", "typical": "평범한 값"}
+    cat, miss = v.get("by_category") or {}, v.get("coverage_missing") or []
+    ok = lambda k: "통과" if v.get(k) else "통과 못 함"
+    lines = [f"- 논리: {ok('logic_sound')}",
+             f"- 수치 반례: {v.get('counterexamples_found')}건 (입력 {v.get('tested_cases')}개: "
+             + ", ".join(f"{n} {cat.get(c, 0)}" for c, n in names.items()) + ")",
+             f"- 가정의 범위: {ok('scope_realistic')}", f"- 비자명성: {ok('non_trivial')}",
+             f"- 경계의 tightness: {ok('tightness_ok')}",
+             "- 반례 탐색 범위: " + ("통과" if not miss else "빠진 범주 " + ", ".join(names.get(c, c) for c in miss))]
+    proof, ref = read(last / "proof.md"), read(last / "refute.md")
+    say(f"[{RUN_ID}] 트랙 C: 논리와 수치 반례는 통과했지만 통과하지 못한 항목이 있습니다.\n\n**판정**\n" + "\n".join(lines)
+        + f"\n\n**정리** (증명 모델의 요약)\n{summary_of(proof) or proof[:800]}"
+        + f"\n\n**반박** (반박 모델의 요약)\n{summary_of(ref) or ref[-800:]}\n\n전문: {last}/proof.md, refute.md")
     if ask("Enter: Phase 5 감사 진행 | q: 폐기하고 종료 > ").lower() == "q":
         raise Stop("트랙 C 결과를 사용자가 폐기", by_user=True)
 
